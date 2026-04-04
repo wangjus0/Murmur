@@ -7,6 +7,7 @@ const STATE_CONFIG: Record<TurnState, { label: string; color: string }> = {
   thinking: { label: "Thinking", color: "#f9e2af" },
   acting: { label: "Acting", color: "#89b4fa" },
   speaking: { label: "Speaking", color: "#cba6f7" },
+  error: { label: "Error", color: "#f38ba8" },
 };
 
 export function StateBadge() {

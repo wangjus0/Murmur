@@ -1,16 +1,19 @@
 import crypto from "node:crypto";
 import type { WebSocket } from "ws";
+import type { RawData } from "ws";
 import type { GoogleGenAI } from "@google/genai";
-import type { TurnState, ServerEvent, ClientEvent } from "@diamond/shared";
+import type { ServerEvent, ClientEvent } from "@diamond/shared";
 import { parseClientEvent } from "@diamond/shared";
 
 import { SttAdapter } from "../voice/stt.js";
 import { handleTranscriptFinal } from "../orchestrator/orchestrator.js";
 import { env } from "../config/env.js";
 
+type SessionTurnState = Extract<ServerEvent, { type: "state" }>['state']
+
 export class Session {
   readonly id: string;
-  private state: TurnState = "idle";
+  private state: SessionTurnState = "idle";
   private ws: WebSocket;
   private ai: GoogleGenAI;
   private stt: SttAdapter | null = null;
@@ -21,8 +24,8 @@ export class Session {
     this.ws = ws;
     this.ai = ai;
 
-    this.ws.on("message", (raw: Buffer | string) => {
-      this.handleMessage(typeof raw === "string" ? raw : raw.toString("utf-8"));
+    this.ws.on("message", (raw: RawData) => {
+      this.handleMessage(normalizeRawSocketData(raw));
     });
 
     this.ws.on("close", () => {
@@ -36,17 +39,17 @@ export class Session {
 
   // ── Outgoing ───────────────────────────────────────────────
   send(event: ServerEvent): void {
-    if (this.ws.readyState === this.ws.OPEN) {
+    if (this.ws.readyState === 1) {
       this.ws.send(JSON.stringify(event));
     }
   }
 
-  setState(next: TurnState): void {
+  setState(next: SessionTurnState): void {
     this.state = next;
     this.send({ type: "state", state: next });
   }
 
-  getState(): TurnState {
+  getState(): SessionTurnState {
     return this.state;
   }
 
@@ -134,4 +137,20 @@ export class Session {
     }
     this.setState("idle");
   }
+}
+
+function normalizeRawSocketData(raw: RawData): string {
+  if (typeof raw === "string") {
+    return raw;
+  }
+
+  if (Array.isArray(raw)) {
+    return Buffer.concat(raw).toString("utf-8");
+  }
+
+  if (raw instanceof ArrayBuffer) {
+    return Buffer.from(raw).toString("utf-8");
+  }
+
+  return raw.toString("utf-8");
 }

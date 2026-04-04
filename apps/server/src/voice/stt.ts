@@ -1,4 +1,4 @@
-import WebSocket from "ws";
+import { WebSocket, type RawData } from "ws";
 import { STT_MODEL_ID, AUDIO_FORMAT } from "@diamond/shared";
 
 interface SttCallbacks {
@@ -34,7 +34,7 @@ export class SttAdapter {
         resolve();
       });
 
-      this.ws.on("message", (data) => {
+      this.ws.on("message", (data: RawData) => {
         try {
           const msg = JSON.parse(data.toString());
 
@@ -48,7 +48,7 @@ export class SttAdapter {
         }
       });
 
-      this.ws.on("error", (err) => {
+      this.ws.on("error", (err: Error) => {
         console.error("[STT] WebSocket error:", err.message);
         this.callbacks.onError(err.message);
         reject(err);
