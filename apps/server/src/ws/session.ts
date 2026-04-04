@@ -8,21 +8,29 @@ import { parseClientEvent } from "@diamond/shared";
 import { SttAdapter } from "../voice/stt.js";
 import { handleTranscriptFinal } from "../orchestrator/orchestrator.js";
 import { env } from "../config/env.js";
+import type {
+  SessionPersistence,
+  SessionTerminalStatus,
+} from "../persistence/session-persistence.js";
 
-type SessionTurnState = Extract<ServerEvent, { type: "state" }>['state']
+type SessionTurnState = Extract<ServerEvent, { type: "state" }>["state"];
 
 export class Session {
   readonly id: string;
   private state: SessionTurnState = "idle";
   private ws: WebSocket;
   private ai: GoogleGenAI;
+  private persistence: SessionPersistence;
   private stt: SttAdapter | null = null;
   private accumulatedTranscript = "";
+  private hasFinalizedRun = false;
+  private narrationSequence = 0;
 
-  constructor(ws: WebSocket, ai: GoogleGenAI) {
+  constructor(ws: WebSocket, ai: GoogleGenAI, persistence: SessionPersistence) {
     this.id = crypto.randomUUID();
     this.ws = ws;
     this.ai = ai;
+    this.persistence = persistence;
 
     this.ws.on("message", (raw: RawData) => {
       this.handleMessage(normalizeRawSocketData(raw));
@@ -30,6 +38,7 @@ export class Session {
 
     this.ws.on("close", () => {
       console.log(`[session:${this.id}] WebSocket closed`);
+      this.finishSession("disconnected");
     });
 
     this.ws.on("error", (err) => {
@@ -41,6 +50,17 @@ export class Session {
   send(event: ServerEvent): void {
     if (this.ws.readyState === 1) {
       this.ws.send(JSON.stringify(event));
+    }
+
+    this.persistOutgoingEvent(event);
+
+    if (event.type === "done") {
+      this.finishSession("completed");
+      return;
+    }
+
+    if (event.type === "error") {
+      this.finishSession("errored", event.message);
     }
   }
 
@@ -83,6 +103,12 @@ export class Session {
   // ── Handlers ───────────────────────────────────────────────
   private onStartSession(): void {
     console.log(`[session:${this.id}] Session started`);
+    this.hasFinalizedRun = false;
+    this.narrationSequence = 0;
+    this.persistNonBlocking(
+      this.persistence.startSession({ sessionId: this.id }),
+      "start session"
+    );
     this.send({ type: "session_started", sessionId: this.id });
     this.setState("idle");
   }
@@ -136,6 +162,71 @@ export class Session {
       this.stt = null;
     }
     this.setState("idle");
+    this.finishSession("interrupted");
+  }
+
+  private persistOutgoingEvent(event: ServerEvent): void {
+    switch (event.type) {
+      case "transcript_final":
+        this.persistNonBlocking(
+          this.persistence.appendTranscriptFinal({
+            sessionId: this.id,
+            text: event.text,
+          }),
+          "append transcript final"
+        );
+        break;
+      case "action_status":
+        this.persistNonBlocking(
+          this.persistence.appendActionEvent({
+            sessionId: this.id,
+            status: "running",
+            step: event.message,
+          }),
+          "append action status"
+        );
+        break;
+      case "narration_text": {
+        const sequence = this.narrationSequence;
+        this.narrationSequence += 1;
+        this.persistNonBlocking(
+          this.persistence.appendNarrationText({
+            sessionId: this.id,
+            text: event.text,
+            sequence,
+          }),
+          "append narration text"
+        );
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  private finishSession(
+    status: SessionTerminalStatus,
+    errorMessage?: string
+  ): void {
+    if (this.hasFinalizedRun) {
+      return;
+    }
+
+    this.hasFinalizedRun = true;
+    this.persistNonBlocking(
+      this.persistence.finishSession({
+        sessionId: this.id,
+        status,
+        errorMessage,
+      }),
+      `finish session as ${status}`
+    );
+  }
+
+  private persistNonBlocking(task: Promise<void>, operation: string): void {
+    void task.catch((error) => {
+      console.error(`[session:${this.id}] Failed to ${operation}:`, error);
+    });
   }
 }
 
