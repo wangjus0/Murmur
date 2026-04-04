@@ -13,8 +13,8 @@
     "dev": "concurrently -n server,client -c blue,green \"npm run dev -w apps/server\" \"npm run dev -w apps/client\"",
     "dev:server": "npm run dev -w apps/server",
     "dev:client": "npm run dev -w apps/client",
-    "dev:electron": "concurrently -k -n client,electron -c green,blue \"npm run dev -w apps/client\" \"npm run dev:electron:app\"",
-    "dev:electron:app": "tsc -p electron/tsconfig.json && ELECTRON_RENDERER_URL=http://localhost:5173 electron dist-electron/main.js",
+    "dev:electron": "concurrently -k -n client,electron -c green,blue \"npm run dev -w apps/client -- --port 5173 --strictPort\" \"npm run dev:electron:app\"",
+    "dev:electron:app": "set -a && . apps/server/.env && set +a && tsc -p electron/tsconfig.json && ELECTRON_RENDERER_URL=http://localhost:5173 electron dist-electron/main.js",
     "build:electron": "npm run build -w apps/client && tsc -p electron/tsconfig.json",
     "package:electron:mac": "test -f build/icons/icon.icns && npm run build:electron && electron-builder --mac --publish never",
     "lint": "npm run lint --workspaces --if-present",
@@ -22,7 +22,7 @@
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
-    "electron": "^35.7.5",
+    "electron": "^41.1.1",
     "electron-builder": "^26.0.12",
     "typescript": "^5.7.0"
   },

@@ -3,16 +3,16 @@ import test from "node:test";
 import { resolveGuardDestination } from "../../apps/client/src/features/auth/guard.ts";
 
 test("resolveGuardDestination returns auth when user is null", () => {
-  const destination = resolveGuardDestination(null);
+  const destination = resolveGuardDestination(null, false);
   assert.equal(destination, "auth");
 });
 
-test("resolveGuardDestination returns onboarding when onboarding flag is missing", () => {
-  const destination = resolveGuardDestination({ user_metadata: {} } as any);
+test("resolveGuardDestination returns onboarding when user exists and onboarding is incomplete", () => {
+  const destination = resolveGuardDestination({} as any, false);
   assert.equal(destination, "onboarding");
 });
 
-test("resolveGuardDestination returns home when onboarding_completed is true", () => {
-  const destination = resolveGuardDestination({ user_metadata: { onboarding_completed: true } } as any);
+test("resolveGuardDestination returns home when user exists and onboarding is complete", () => {
+  const destination = resolveGuardDestination({} as any, true);
   assert.equal(destination, "home");
 });
