@@ -12,6 +12,7 @@ import type {
   SessionPersistence,
   SessionTerminalStatus,
 } from "../persistence/session-persistence.js";
+import type { BrowserAdapter } from "../tools/browser/adapter.js";
 
 type SessionTurnState = Extract<ServerEvent, { type: "state" }>["state"];
 
@@ -25,6 +26,7 @@ export class Session {
   private accumulatedTranscript = "";
   private hasFinalizedRun = false;
   private narrationSequence = 0;
+  private browserAdapter: BrowserAdapter | null = null;
 
   constructor(ws: WebSocket, ai: GoogleGenAI, persistence: SessionPersistence) {
     this.id = crypto.randomUUID();
@@ -71,6 +73,10 @@ export class Session {
 
   getState(): SessionTurnState {
     return this.state;
+  }
+
+  setBrowserAdapter(adapter: BrowserAdapter | null): void {
+    this.browserAdapter = adapter;
   }
 
   // ── Incoming ───────────────────────────────────────────────
@@ -160,6 +166,10 @@ export class Session {
     if (this.stt) {
       this.stt.close();
       this.stt = null;
+    }
+    if (this.browserAdapter) {
+      this.browserAdapter.cancel();
+      this.browserAdapter = null;
     }
     this.setState("idle");
     this.finishSession("interrupted");
