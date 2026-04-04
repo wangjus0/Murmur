@@ -1,6 +1,10 @@
 {
   "name": "diamondhacks2026",
+  "version": "0.1.0",
+  "description": "Murmur macOS Electron desktop app",
+  "author": "Murmur Team",
   "private": true,
+  "main": "dist-electron/main.js",
   "workspaces": [
     "packages/*",
     "apps/*"
@@ -9,10 +13,41 @@
     "dev": "concurrently -n server,client -c blue,green \"npm run dev -w apps/server\" \"npm run dev -w apps/client\"",
     "dev:server": "npm run dev -w apps/server",
     "dev:client": "npm run dev -w apps/client",
+    "dev:electron": "concurrently -k -n client,electron -c green,blue \"npm run dev -w apps/client\" \"npm run dev:electron:app\"",
+    "dev:electron:app": "tsc -p electron/tsconfig.json && ELECTRON_RENDERER_URL=http://localhost:5173 electron dist-electron/main.js",
+    "build:electron": "npm run build -w apps/client && tsc -p electron/tsconfig.json",
+    "package:electron:mac": "test -f build/icons/icon.icns && npm run build:electron && electron-builder --mac --publish never",
+    "lint": "npm run lint --workspaces --if-present",
     "test": "node --import tsx --test --test-isolation=none tests/unit/*.test.ts tests/integration/*.test.ts"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
+    "electron": "^35.7.5",
+    "electron-builder": "^26.0.12",
     "typescript": "^5.7.0"
+  },
+  "build": {
+    "appId": "com.murmur.desktop",
+    "productName": "Murmur",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist-electron/**/*",
+      "apps/client/dist/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "build/icons/icon.icns",
+      "identity": null,
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
+    }
   }
 }
