@@ -4,6 +4,7 @@ import { StateBadge } from "./features/voice/StateBadge";
 import { TranscriptPanel } from "./features/transcript/TranscriptPanel";
 import { NarrationPanel } from "./features/narration/NarrationPanel";
 import { MicButton } from "./features/voice/MicButton";
+import { ActionTimeline } from "./features/browser/ActionTimeline";
 import { useSessionStore } from "./store/session";
 
 export function App() {
@@ -15,9 +16,11 @@ export function App() {
   const intent = useSessionStore((s) => s.intent);
   const actionStatuses = useSessionStore((s) => s.actionStatuses);
   const error = useSessionStore((s) => s.error);
+  const setError = useSessionStore((s) => s.setError);
 
   const micDisabled =
     turnState === "thinking" || turnState === "acting" || turnState === "speaking";
+  const canInterrupt = turnState === "acting" || turnState === "speaking";
 
   return (
     <div
@@ -54,6 +57,9 @@ export function App() {
 
         {/* Transcript */}
         <TranscriptPanel />
+
+        {/* Action Timeline */}
+        <ActionTimeline />
 
         {/* Intent */}
         {intent && (
@@ -128,25 +134,26 @@ export function App() {
             onAudioChunk={sendAudioChunk}
             onStartSession={sendStartSession}
             onStop={sendAudioEnd}
+            onError={setError}
             disabled={micDisabled}
           />
-          {(turnState === "acting" || turnState === "speaking") && (
-            <button
-              onClick={sendInterrupt}
-              style={{
-                padding: "16px 32px",
-                fontSize: "18px",
-                fontWeight: "bold",
-                border: "2px solid #f38ba8",
-                borderRadius: "50px",
-                cursor: "pointer",
-                color: "#f38ba8",
-                background: "transparent",
-              }}
-            >
-              Interrupt
-            </button>
-          )}
+          <button
+            onClick={sendInterrupt}
+            disabled={!canInterrupt}
+            style={{
+              padding: "16px 32px",
+              fontSize: "18px",
+              fontWeight: "bold",
+              border: "2px solid #f38ba8",
+              borderRadius: "50px",
+              cursor: canInterrupt ? "pointer" : "not-allowed",
+              color: "#f38ba8",
+              background: "transparent",
+              opacity: canInterrupt ? 1 : 0.5,
+            }}
+          >
+            Interrupt
+          </button>
         </div>
       </div>
     </div>

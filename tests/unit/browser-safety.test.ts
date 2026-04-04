@@ -22,3 +22,12 @@ test("form fill draft prompt explicitly blocks dangerous actions", () => {
   assert.match(prompt, /Do NOT click any submit, pay, checkout, or confirmation buttons\./i);
   assert.match(prompt, /Report which fields were filled and with what values\./i);
 });
+
+test("form fill prompt can allow submit when enabled", () => {
+  const prompt = buildFormFillDraftTaskPrompt("fill and submit this form", {
+    allowSubmit: true,
+  });
+
+  assert.match(prompt, /If the user explicitly asked to submit, submit the form once/i);
+  assert.match(prompt, /Never perform payment, checkout, or purchase actions\./i);
+});

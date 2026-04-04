@@ -14,12 +14,24 @@ export function createSocket(url: string): Socket {
   let backoff = 1000;
   let intentionallyClosed = false;
   const listeners: Array<(event: ServerEvent) => void> = [];
+  const pendingMessages: string[] = [];
+
+  function flushPendingMessages(): void {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    for (const message of pendingMessages.splice(0, pendingMessages.length)) {
+      ws.send(message);
+    }
+  }
 
   function connect(): void {
     ws = new WebSocket(url);
 
     ws.addEventListener("open", () => {
       backoff = 1000; // reset on successful connect
+      flushPendingMessages();
     });
 
     ws.addEventListener("message", (msg) => {
@@ -51,9 +63,14 @@ export function createSocket(url: string): Socket {
 
   return {
     send(event: ClientEvent): void {
+      const message = JSON.stringify(event);
+
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(event));
+        ws.send(message);
+        return;
       }
+
+      pendingMessages.push(message);
     },
 
     onEvent(cb: (event: ServerEvent) => void): void {

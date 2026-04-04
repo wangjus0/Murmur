@@ -1,10 +1,14 @@
 import type { GoogleGenAI } from "@google/genai";
-import type { ServerEvent } from "@diamond/shared";
-import { classifyIntent } from "./intent.js";
-import { narrate } from "../voice/narrator.js";
-import { BrowserAdapter } from "../tools/browser/adapter.js";
+import type { IntentResult, ServerEvent } from "@diamond/shared";
 import { env } from "../config/env.js";
-import type { IntentResult } from "@diamond/shared";
+import { BrowserAdapter } from "../tools/browser/adapter.js";
+import { narrate } from "../voice/narrator.js";
+import {
+  createPolicyConfig,
+  evaluateIntentPolicy,
+  logPolicyBlock,
+} from "../safety/policy.js";
+import { classifyIntent } from "./intent.js";
 
 interface Orchestratable {
   send(event: ServerEvent): void;
@@ -19,11 +23,16 @@ interface BrowserExecutor {
   ): Promise<string>;
   runFormFillDraft(
     query: string,
-    callbacks: { onStatus: (message: string) => void }
+    callbacks: { onStatus: (message: string) => void },
+    options?: { allowSubmit?: boolean }
   ): Promise<string>;
 }
 
-interface TranscriptFinalDependencies {
+interface TranscriptFinalLegacyDependencies {
+  classify?: (
+    ai: GoogleGenAI,
+    transcript: string
+  ) => Promise<IntentResult>;
   classifyIntent?: (
     ai: GoogleGenAI,
     transcript: string
@@ -37,46 +46,88 @@ interface TranscriptFinalDependencies {
   browserApiKey?: string;
 }
 
+type TranscriptFinalOverrideDeps = Partial<TranscriptFinalDeps> &
+  TranscriptFinalLegacyDependencies;
+
+type TranscriptFinalDeps = Readonly<{
+  classify: (ai: GoogleGenAI, text: string) => Promise<IntentResult>;
+  narrate: (session: Orchestratable, text: string, apiKey: string) => Promise<void>;
+  createBrowserAdapter: (apiKey: string) => BrowserExecutor;
+  browserApiKey: string;
+}>;
+
+const defaultDeps: TranscriptFinalDeps = {
+  classify: classifyIntent,
+  narrate,
+  createBrowserAdapter: (browserApiKey: string) => new BrowserAdapter(browserApiKey),
+  browserApiKey: env.BROWSER_USE_API_KEY,
+};
+
+function resolveDeps(maybeDeps: TranscriptFinalOverrideDeps | undefined): TranscriptFinalDeps {
+  return {
+    classify: maybeDeps?.classify ?? maybeDeps?.classifyIntent ?? defaultDeps.classify,
+    narrate: maybeDeps?.narrate ?? defaultDeps.narrate,
+    createBrowserAdapter:
+      maybeDeps?.createBrowserAdapter ?? defaultDeps.createBrowserAdapter,
+    browserApiKey: maybeDeps?.browserApiKey ?? defaultDeps.browserApiKey,
+  };
+}
+
 export async function handleTranscriptFinal(
   session: Orchestratable,
   ai: GoogleGenAI,
   apiKey: string,
   text: string,
-  dependencies: TranscriptFinalDependencies = {}
+  allowlistOrDeps?:
+    | string
+    | TranscriptFinalOverrideDeps,
+  maybeDeps?: TranscriptFinalOverrideDeps
 ): Promise<void> {
-  const classifyIntentImpl = dependencies.classifyIntent ?? classifyIntent;
-  const narrateImpl = dependencies.narrate ?? narrate;
-  const createBrowserAdapter =
-    dependencies.createBrowserAdapter ??
-    ((browserApiKey: string) => new BrowserAdapter(browserApiKey));
-  const browserApiKey = dependencies.browserApiKey ?? env.BROWSER_USE_API_KEY;
+  const navigationAllowlist =
+    typeof allowlistOrDeps === "string" ? allowlistOrDeps : env.NAVIGATION_ALLOWLIST;
+  const deps = resolveDeps(
+    typeof allowlistOrDeps === "string" ? maybeDeps : allowlistOrDeps
+  );
 
   try {
     session.setState("thinking");
 
-    const result = await classifyIntentImpl(ai, text);
+    const result = await deps.classify(ai, text);
     session.send({ type: "intent", intent: result });
 
     if (result.intent === "clarify") {
       session.setState("speaking");
-      await narrateImpl(
-        session,
-        result.clarification || "Could you clarify?",
-        apiKey
-      );
+      await deps.narrate(session, result.clarification || "Could you clarify?", apiKey);
       session.setState("idle");
       session.send({ type: "done" });
       return;
     }
 
-    // search or form_fill_draft -- execute via Browser Use
+    const policyDecision = evaluateIntentPolicy(
+      result,
+      createPolicyConfig(navigationAllowlist, env.ALLOW_FINAL_FORM_SUBMISSION)
+    );
+    if (!policyDecision.allowed) {
+      logPolicyBlock({
+        reason: policyDecision.reason,
+        intent: result.intent,
+        query: result.query,
+      });
+
+      session.send({ type: "action_status", message: policyDecision.message });
+      session.setState("speaking");
+      await deps.narrate(session, policyDecision.message, apiKey);
+      session.setState("idle");
+      session.send({ type: "done" });
+      return;
+    }
+
     session.setState("acting");
-    const browser = createBrowserAdapter(browserApiKey);
+    const browser = deps.createBrowserAdapter(deps.browserApiKey);
     session.setBrowserAdapter(browser);
 
     const statusCb = {
-      onStatus: (msg: string) =>
-        session.send({ type: "action_status", message: msg }),
+      onStatus: (msg: string) => session.send({ type: "action_status", message: msg }),
     };
 
     let output: string;
@@ -84,7 +135,9 @@ export async function handleTranscriptFinal(
       if (result.intent === "search") {
         output = await browser.runSearch(result.query, statusCb);
       } else {
-        output = await browser.runFormFillDraft(result.query, statusCb);
+        output = await browser.runFormFillDraft(result.query, statusCb, {
+          allowSubmit: env.ALLOW_FINAL_FORM_SUBMISSION,
+        });
       }
     } catch (err) {
       console.error("[Orchestrator] Browser error:", err);
@@ -93,7 +146,7 @@ export async function handleTranscriptFinal(
 
     session.setBrowserAdapter(null);
     session.setState("speaking");
-    await narrateImpl(session, output, apiKey);
+    await deps.narrate(session, output, apiKey);
 
     session.setState("idle");
     session.send({ type: "done" });

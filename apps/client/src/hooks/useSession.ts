@@ -18,11 +18,20 @@ export function useSession(
     socket.onEvent((event) => {
       switch (event.type) {
         case "session_started":
+          store.getState().clearActionTimeline();
           store.getState().setSessionId(event.sessionId);
           store.getState().setConnected(true);
+          store.getState().addActionTimelineItem({
+            kind: "session",
+            message: `Session started (${event.sessionId})`,
+          });
           break;
         case "state":
           store.getState().setTurnState(event.state);
+          store.getState().addActionTimelineItem({
+            kind: "state",
+            message: `State changed to ${event.state}`,
+          });
           break;
         case "transcript_partial":
           store.getState().setTranscriptPartial(event.text);
@@ -33,12 +42,24 @@ export function useSession(
           break;
         case "intent":
           store.getState().setIntent(event.intent);
+          store.getState().addActionTimelineItem({
+            kind: "intent",
+            message: `Intent detected: ${event.intent.intent} (${Math.round(event.intent.confidence * 100)}%)`,
+          });
           break;
         case "action_status":
+          store.getState().addActionTimelineItem({
+            kind: "action",
+            message: event.message,
+          });
           store.getState().addActionStatus(event.message);
           break;
         case "narration_text":
           store.getState().setNarrationText(event.text);
+          store.getState().addActionTimelineItem({
+            kind: "narration",
+            message: event.text,
+          });
           break;
         case "narration_audio":
           audioPlayer.enqueue(event.audio);
@@ -46,9 +67,17 @@ export function useSession(
         case "done":
           store.getState().setTurnState("idle");
           store.getState().clearActionStatuses();
+          store.getState().addActionTimelineItem({
+            kind: "done",
+            message: "Turn completed",
+          });
           break;
         case "error":
           store.getState().setError(event.message);
+          store.getState().addActionTimelineItem({
+            kind: "error",
+            message: event.message,
+          });
           break;
       }
     });

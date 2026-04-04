@@ -24,9 +24,13 @@ export class BrowserAdapter {
 
   async runFormFillDraft(
     query: string,
-    callbacks: BrowserTaskCallbacks
+    callbacks: BrowserTaskCallbacks,
+    options?: { allowSubmit?: boolean }
   ): Promise<string> {
-    return this.runTask(buildFormFillDraftTaskPrompt(query), callbacks);
+    return this.runTask(
+      buildFormFillDraftTaskPrompt(query, { allowSubmit: options?.allowSubmit ?? false }),
+      callbacks
+    );
   }
 
   async cancel(): Promise<void> {
@@ -161,7 +165,20 @@ export function buildSearchTaskPrompt(query: string): string {
   );
 }
 
-export function buildFormFillDraftTaskPrompt(query: string): string {
+export function buildFormFillDraftTaskPrompt(
+  query: string,
+  options?: { allowSubmit?: boolean }
+): string {
+  if (options?.allowSubmit) {
+    return (
+      `Based on this request: '${query}', navigate to the appropriate website. ` +
+      `Find the relevant form and fill it out with reasonable values based on the request. ` +
+      `If the user explicitly asked to submit, submit the form once after fields are completed. ` +
+      `Never perform payment, checkout, or purchase actions. ` +
+      `Report which fields were filled and whether submission occurred.`
+    );
+  }
+
   return (
     `Based on this request: '${query}', navigate to the appropriate website. ` +
     `Find the relevant form and fill it out with reasonable values based on the request. ` +

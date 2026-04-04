@@ -1,20 +1,42 @@
-import crypto from "node:crypto";
-import type { WebSocket } from "ws";
-import type { RawData } from "ws";
 import type { GoogleGenAI } from "@google/genai";
-import type { ServerEvent, ClientEvent } from "@diamond/shared";
+import type { ClientEvent, ServerEvent } from "@diamond/shared";
 import { parseClientEvent } from "@diamond/shared";
-
-import { SttAdapter } from "../voice/stt.js";
-import { handleTranscriptFinal } from "../orchestrator/orchestrator.js";
+import crypto from "node:crypto";
+import type { RawData, WebSocket } from "ws";
 import { env } from "../config/env.js";
 import type {
   SessionPersistence,
   SessionTerminalStatus,
 } from "../persistence/session-persistence.js";
+import { SessionPersistenceService } from "../modules/session/session-persistence-service.js";
+import type {
+  SessionConnectionContext,
+  SessionStatus,
+} from "../modules/session/session-types.js";
+import { handleTranscriptFinal } from "../orchestrator/orchestrator.js";
 import type { BrowserAdapter } from "../tools/browser/adapter.js";
+import { SttAdapter } from "../voice/stt.js";
 
 type SessionTurnState = Extract<ServerEvent, { type: "state" }>["state"];
+
+const DEFAULT_CONNECTION: SessionConnectionContext = {
+  ip: null,
+  userAgent: null,
+};
+
+const NOOP_PERSISTENCE: SessionPersistence = {
+  async startSession() {},
+  async appendTranscriptFinal() {},
+  async appendActionEvent() {},
+  async appendNarrationText() {},
+  async finishSession() {},
+  async listSessions() {
+    return [];
+  },
+  async getSessionReplay() {
+    return null;
+  },
+};
 
 export class Session {
   readonly id: string;
@@ -22,17 +44,28 @@ export class Session {
   private ws: WebSocket;
   private ai: GoogleGenAI;
   private persistence: SessionPersistence;
+  private readonly memoryPersistence: SessionPersistenceService | null;
+  private readonly connection: SessionConnectionContext;
   private stt: SttAdapter | null = null;
   private accumulatedTranscript = "";
   private hasFinalizedRun = false;
   private narrationSequence = 0;
   private browserAdapter: BrowserAdapter | null = null;
+  private hasEnded = false;
 
-  constructor(ws: WebSocket, ai: GoogleGenAI, persistence: SessionPersistence) {
+  constructor(
+    ws: WebSocket,
+    ai: GoogleGenAI,
+    persistence?: SessionPersistence,
+    connection: SessionConnectionContext = DEFAULT_CONNECTION,
+    memoryPersistence: SessionPersistenceService | null = null
+  ) {
     this.id = crypto.randomUUID();
     this.ws = ws;
     this.ai = ai;
-    this.persistence = persistence;
+    this.persistence = persistence ?? NOOP_PERSISTENCE;
+    this.memoryPersistence = memoryPersistence;
+    this.connection = connection;
 
     this.ws.on("message", (raw: RawData) => {
       this.handleMessage(normalizeRawSocketData(raw));
@@ -41,15 +74,21 @@ export class Session {
     this.ws.on("close", () => {
       console.log(`[session:${this.id}] WebSocket closed`);
       this.finishSession("disconnected");
+      this.endSession("closed");
     });
 
     this.ws.on("error", (err) => {
       console.error(`[session:${this.id}] WebSocket error:`, err);
+      this.finishSession("errored", err instanceof Error ? err.message : "WebSocket error");
+      this.endSession("error", err instanceof Error ? err.message : "WebSocket error");
     });
   }
 
-  // ── Outgoing ───────────────────────────────────────────────
   send(event: ServerEvent): void {
+    if (event.type === "action_status") {
+      this.memoryPersistence?.persistActionEvent(this.id, event.message);
+    }
+
     if (this.ws.readyState === 1) {
       this.ws.send(JSON.stringify(event));
     }
@@ -58,11 +97,13 @@ export class Session {
 
     if (event.type === "done") {
       this.finishSession("completed");
+      this.endSession("completed");
       return;
     }
 
     if (event.type === "error") {
       this.finishSession("errored", event.message);
+      this.endSession("error", event.message);
     }
   }
 
@@ -79,7 +120,6 @@ export class Session {
     this.browserAdapter = adapter;
   }
 
-  // ── Incoming ───────────────────────────────────────────────
   private handleMessage(raw: string): void {
     let event: ClientEvent;
     try {
@@ -95,10 +135,10 @@ export class Session {
         this.onStartSession();
         break;
       case "audio_chunk":
-        this.onAudioChunk(event.data);
+        void this.onAudioChunk(event.data);
         break;
       case "audio_end":
-        this.onAudioEnd();
+        void this.onAudioEnd();
         break;
       case "interrupt":
         this.onInterrupt();
@@ -106,17 +146,19 @@ export class Session {
     }
   }
 
-  // ── Handlers ───────────────────────────────────────────────
   private onStartSession(): void {
     console.log(`[session:${this.id}] Session started`);
     this.hasFinalizedRun = false;
     this.narrationSequence = 0;
+
     this.persistNonBlocking(
       this.persistence.startSession({ sessionId: this.id }),
       "start session"
     );
+    this.memoryPersistence?.startSession(this.id, this.connection);
+
     this.send({ type: "session_started", sessionId: this.id });
-    this.setState("idle");
+    this.setState("listening");
   }
 
   private async onAudioChunk(data: string): Promise<void> {
@@ -132,6 +174,7 @@ export class Session {
         },
         onFinal: (text) => {
           this.accumulatedTranscript = text;
+          this.memoryPersistence?.persistTranscript(this.id, text);
           this.send({ type: "transcript_final", text });
         },
         onError: (error) => {
@@ -155,7 +198,13 @@ export class Session {
 
     const transcript = this.accumulatedTranscript.trim();
     if (transcript) {
-      await handleTranscriptFinal(this, this.ai, env.ELEVEN_LABS_API_KEY, transcript);
+      await handleTranscriptFinal(
+        this,
+        this.ai,
+        env.ELEVEN_LABS_API_KEY,
+        transcript,
+        env.NAVIGATION_ALLOWLIST
+      );
     } else {
       this.setState("idle");
     }
@@ -167,12 +216,15 @@ export class Session {
       this.stt.close();
       this.stt = null;
     }
+
     if (this.browserAdapter) {
-      this.browserAdapter.cancel();
+      void this.browserAdapter.cancel();
       this.browserAdapter = null;
     }
-    this.setState("idle");
+
     this.finishSession("interrupted");
+    this.endSession("interrupted");
+    this.setState("idle");
   }
 
   private persistOutgoingEvent(event: ServerEvent): void {
@@ -214,10 +266,7 @@ export class Session {
     }
   }
 
-  private finishSession(
-    status: SessionTerminalStatus,
-    errorMessage?: string
-  ): void {
+  private finishSession(status: SessionTerminalStatus, errorMessage?: string): void {
     if (this.hasFinalizedRun) {
       return;
     }
@@ -237,6 +286,18 @@ export class Session {
     void task.catch((error) => {
       console.error(`[session:${this.id}] Failed to ${operation}:`, error);
     });
+  }
+
+  private endSession(
+    status: Exclude<SessionStatus, "active">,
+    errorMessage: string | null = null
+  ): void {
+    if (this.hasEnded) {
+      return;
+    }
+
+    this.hasEnded = true;
+    this.memoryPersistence?.endSession(this.id, status, errorMessage);
   }
 }
 

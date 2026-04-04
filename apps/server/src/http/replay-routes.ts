@@ -28,7 +28,7 @@ export function registerReplayRoutes(
   app.get("/api/sessions/:sessionId", async (req: Request, res: Response) => {
     try {
       const sessionId = req.params.sessionId;
-      if (!sessionId) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) {
         res.status(400).json({ error: "sessionId is required." });
         return;
       }

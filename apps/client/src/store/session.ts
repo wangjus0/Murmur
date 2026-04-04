@@ -1,12 +1,29 @@
 import { create } from "zustand";
 import type { TurnState, IntentResult } from "@diamond/shared";
 
+export type ActionTimelineKind =
+  | "session"
+  | "state"
+  | "action"
+  | "intent"
+  | "narration"
+  | "done"
+  | "error";
+
+export interface ActionTimelineItem {
+  id: string;
+  kind: ActionTimelineKind;
+  message: string;
+  createdAt: number;
+}
+
 export interface SessionState {
   connected: boolean;
   sessionId: string | null;
   turnState: TurnState;
   transcriptPartial: string;
   transcriptFinals: string[];
+  actionTimeline: ActionTimelineItem[];
   intent: IntentResult | null;
   narrationText: string;
   actionStatuses: string[];
@@ -18,6 +35,8 @@ export interface SessionState {
   setTurnState: (turnState: TurnState) => void;
   setTranscriptPartial: (text: string) => void;
   addTranscriptFinal: (text: string) => void;
+  addActionTimelineItem: (entry: Omit<ActionTimelineItem, "id" | "createdAt">) => void;
+  clearActionTimeline: () => void;
   setIntent: (intent: IntentResult | null) => void;
   setNarrationText: (text: string) => void;
   addActionStatus: (message: string) => void;
@@ -32,11 +51,14 @@ const initialState = {
   turnState: "idle" as TurnState,
   transcriptPartial: "",
   transcriptFinals: [] as string[],
+  actionTimeline: [] as ActionTimelineItem[],
   intent: null,
   narrationText: "",
   actionStatuses: [] as string[],
   error: null,
 };
+
+const TIMELINE_MAX_ITEMS = 200;
 
 export const useSessionStore = create<SessionState>((set) => ({
   ...initialState,
@@ -47,6 +69,22 @@ export const useSessionStore = create<SessionState>((set) => ({
   setTranscriptPartial: (text) => set({ transcriptPartial: text }),
   addTranscriptFinal: (text) =>
     set((s) => ({ transcriptFinals: [...s.transcriptFinals, text] })),
+  addActionTimelineItem: (entry) =>
+    set((s) => {
+      const nextTimeline = [
+        ...s.actionTimeline,
+        {
+          id: crypto.randomUUID(),
+          createdAt: Date.now(),
+          ...entry,
+        },
+      ];
+
+      return {
+        actionTimeline: nextTimeline.slice(-TIMELINE_MAX_ITEMS),
+      };
+    }),
+  clearActionTimeline: () => set({ actionTimeline: [] }),
   setIntent: (intent) => set({ intent }),
   setNarrationText: (text) => set({ narrationText: text }),
   addActionStatus: (message) =>
