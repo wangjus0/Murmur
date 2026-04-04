@@ -1,0 +1,65 @@
+import { GoogleGenAI } from "@google/genai";
+import { z } from "zod";
+import type { IntentResult } from "@diamond/shared";
+
+const intentResultSchema = z.object({
+  intent: z.enum(["search", "form_fill_draft", "clarify"]),
+  confidence: z.number().min(0).max(1),
+  query: z.string(),
+  clarification: z.string().optional(),
+});
+
+const SYSTEM_PROMPT = `You are an intent classifier for a voice-controlled browser agent.
+Classify the user's speech into exactly ONE of these intents:
+
+- "search": The user wants to search for information on the web (e.g. "search for restaurants near me", "look up the weather", "find cheap flights to LA")
+- "form_fill_draft": The user wants to fill out a form on a website (e.g. "fill out the contact form", "sign up for the newsletter", "enter my shipping address"). This is draft only - never submit.
+- "clarify": The intent is unclear or ambiguous and you need more information.
+
+Respond with JSON only:
+{
+  "intent": "search" | "form_fill_draft" | "clarify",
+  "confidence": 0.0 to 1.0,
+  "query": "the original user text",
+  "clarification": "optional question to ask if intent is clarify"
+}`;
+
+const FALLBACK: IntentResult = {
+  intent: "clarify",
+  confidence: 0,
+  query: "",
+  clarification: "I didn't understand that. Could you try rephrasing?",
+};
+
+export async function classifyIntent(
+  ai: GoogleGenAI,
+  transcript: string
+): Promise<IntentResult> {
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: `${SYSTEM_PROMPT}\n\nUser said: "${transcript}"`,
+      config: { responseMimeType: "application/json" },
+    });
+
+    const text = response.text;
+    if (!text) return { ...FALLBACK, query: transcript };
+
+    const parsed = intentResultSchema.parse(JSON.parse(text));
+
+    if (parsed.confidence < 0.6) {
+      return {
+        intent: "clarify",
+        confidence: parsed.confidence,
+        query: transcript,
+        clarification:
+          parsed.clarification || "I'm not sure what you meant. Could you rephrase?",
+      };
+    }
+
+    return { ...parsed, query: transcript };
+  } catch (err) {
+    console.error("[Intent] Classification failed:", err);
+    return { ...FALLBACK, query: transcript };
+  }
+}

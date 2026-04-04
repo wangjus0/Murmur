@@ -1,1 +1,3 @@
-app/server/.env
+node_modules/
+dist/
+apps/server/.env

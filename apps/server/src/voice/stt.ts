@@ -1,0 +1,77 @@
+import WebSocket from "ws";
+import { STT_MODEL_ID, AUDIO_FORMAT } from "@diamond/shared";
+
+interface SttCallbacks {
+  onPartial: (text: string) => void;
+  onFinal: (text: string) => void;
+  onError: (error: string) => void;
+}
+
+export class SttAdapter {
+  private ws: WebSocket | null = null;
+  private apiKey: string;
+  private callbacks: SttCallbacks;
+
+  constructor(apiKey: string, callbacks: SttCallbacks) {
+    this.apiKey = apiKey;
+    this.callbacks = callbacks;
+  }
+
+  connect(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const url = new URL("wss://api.elevenlabs.io/v1/speech-to-text/realtime");
+      url.searchParams.set("model_id", STT_MODEL_ID);
+      url.searchParams.set("audio_format", AUDIO_FORMAT);
+      url.searchParams.set("commit_strategy", "vad");
+      url.searchParams.set("language_code", "en");
+
+      this.ws = new WebSocket(url.toString(), {
+        headers: { "xi-api-key": this.apiKey },
+      });
+
+      this.ws.on("open", () => {
+        console.log("[STT] Connected to ElevenLabs");
+        resolve();
+      });
+
+      this.ws.on("message", (data) => {
+        try {
+          const msg = JSON.parse(data.toString());
+
+          if (msg.type === "partial_transcript" && msg.text?.trim()) {
+            this.callbacks.onPartial(msg.text);
+          } else if (msg.type === "final_transcript" && msg.text?.trim()) {
+            this.callbacks.onFinal(msg.text);
+          }
+        } catch (err) {
+          console.error("[STT] Failed to parse message:", err);
+        }
+      });
+
+      this.ws.on("error", (err) => {
+        console.error("[STT] WebSocket error:", err.message);
+        this.callbacks.onError(err.message);
+        reject(err);
+      });
+
+      this.ws.on("close", () => {
+        console.log("[STT] Connection closed");
+        this.ws = null;
+      });
+    });
+  }
+
+  sendAudio(base64Chunk: string): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ audio: base64Chunk }));
+    }
+  }
+
+  close(): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ audio: "" }));
+      this.ws.close();
+    }
+    this.ws = null;
+  }
+}
