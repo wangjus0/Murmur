@@ -18,6 +18,23 @@ Core experience loop:
 - **ElevenLabs**: real-time speech-to-text (STT) and expressive text-to-speech (TTS)
 - **Browser Use**: live browser automation and web task execution
 
+## Environment Variables
+
+Current server env template is defined in `apps/server/src/.env.example`.
+
+```bash
+PORT=3000
+
+ELEVEN_LABS_API_KEY=
+BROWSER_USE_API_KEY=
+
+GEMINI_API_KEY=
+```
+
+Notes:
+- Keep all secret values out of source control.
+- Use `.env.example` for variable names and `.env` for local values.
+
 ## Product Vision
 
 Create a conversational web assistant that feels like working with a capable human operator, not a traditional tool.
