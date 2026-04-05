@@ -21,7 +21,17 @@ const KIND_CLASSNAMES = {
   error: "timeline-error",
 } as const;
 
-export function ActionTimeline() {
+interface ActionTimelineProps {
+  className?: string;
+  title?: string;
+  emptyMessage?: string;
+}
+
+export function ActionTimeline({
+  className,
+  title = "Action Timeline",
+  emptyMessage = "Waiting for session activity...",
+}: ActionTimelineProps) {
   const actionTimeline = useSessionStore((s) => s.actionTimeline);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -32,11 +42,11 @@ export function ActionTimeline() {
   }, [actionTimeline]);
 
   return (
-    <div className="panel stack-panel scroll-panel timeline-panel">
-      <h3 className="panel-heading">Action Timeline</h3>
+    <div className={`panel stack-panel scroll-panel timeline-panel ${className ?? ""}`}>
+      <h3 className="panel-heading">{title}</h3>
 
       {actionTimeline.length === 0 && (
-        <p className="timeline-empty">Waiting for session activity...</p>
+        <p className="timeline-empty">{emptyMessage}</p>
       )}
 
       {actionTimeline.map((item, index) => (

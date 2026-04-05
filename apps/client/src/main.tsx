@@ -7,6 +7,11 @@ import { getSupabaseClient } from "./lib/supabase";
 import "./styles.css";
 
 const isVoicePopover = window.location.hash === "#/voice-popover";
+const runtimePlatform = window.desktop?.getRuntimeInfo?.().platform;
+
+if (runtimePlatform === "darwin") {
+  document.body.classList.add("runtime-macos");
+}
 
 if (!isVoicePopover && typeof window.desktop?.getSupabaseConfig === "function") {
   getSupabaseClient();

@@ -40,26 +40,19 @@ type StepMeta = {
 
 const STEP_META: StepMeta[] = [
   {
-    key: "permissions",
-    title: "Permissions",
-    description: "Enable assistant and microphone access before starting your first session.",
-  },
-  {
     key: "account",
-    title: "Account basics",
-    description: "Placeholder fields for profile and workspace metadata.",
+    title: "Your name",
+    description: "Tell us what to call you.",
   },
   {
-    key: "workflow",
-    title: "Workflow snapshot",
-    description: "Placeholder prompts for use cases and primary outcomes.",
-  },
-  {
-    key: "preferences",
-    title: "Command preferences",
-    description: "Placeholder settings for shortcut and assistant behavior.",
+    key: "permissions",
+    title: "Voice setup",
+    description: "Allow microphone access and pick your audio pill keybind.",
   },
 ];
+
+const PERMISSIONS_STEP_INDEX = STEP_META.findIndex((step) => step.key === "permissions");
+const SAFE_PERMISSIONS_STEP_INDEX = PERMISSIONS_STEP_INDEX >= 0 ? PERMISSIONS_STEP_INDEX : 0;
 
 const INITIAL_STEP_ERRORS: Record<StepKey, StepErrors> = {
   permissions: {},
@@ -92,11 +85,85 @@ const MICROPHONE_STATUS_LABEL: Record<MicrophoneAccessStatus, string> = {
   unknown: "Unknown",
 };
 
-function PermissionStep(props: {
-  data: OnboardingFormData["permissions"];
+function AccountStep(props: {
+  data: OnboardingFormData["account"];
   errors: StepErrors;
-  onAssistantAccessChange: (value: "granted" | "pending") => void;
-  onScreenAccessChange: (value: "granted" | "pending") => void;
+  onDisplayNameChange: (value: string) => void;
+}) {
+  return (
+    <div className="onboarding-fields">
+      <label className="field">
+        <span className="field-label">Name</span>
+        <input
+          type="text"
+          value={props.data.displayName}
+          onChange={(event) => props.onDisplayNameChange(event.target.value)}
+          placeholder="Alex Rivera"
+          aria-invalid={Boolean(props.errors.displayName)}
+          aria-describedby={props.errors.displayName ? "display-name-error" : undefined}
+        />
+        <InlineError id="display-name-error" message={props.errors.displayName} />
+      </label>
+    </div>
+  );
+}
+
+const SHORTCUT_MODIFIER_KEYS = new Set(["Shift", "Control", "Meta", "Alt", "AltGraph"]);
+
+const SHORTCUT_KEY_LABELS: Record<string, string> = {
+  " ": "Space",
+  ArrowUp: "Up",
+  ArrowDown: "Down",
+  ArrowLeft: "Left",
+  ArrowRight: "Right",
+  Escape: "Esc",
+};
+const DEFAULT_SHORTCUT = "Cmd+Shift+Space";
+
+type ShortcutInputEvent = {
+  key: string;
+  metaKey: boolean;
+  ctrlKey: boolean;
+  altKey: boolean;
+  shiftKey: boolean;
+};
+
+function formatShortcutFromKeyDown(event: ShortcutInputEvent): string | null {
+  const key = event.key;
+  if (!key || key === "Dead" || SHORTCUT_MODIFIER_KEYS.has(key)) {
+    return null;
+  }
+
+  const modifiers: string[] = [];
+  if (event.metaKey) {
+    modifiers.push("Cmd");
+  }
+  if (event.ctrlKey) {
+    modifiers.push("Ctrl");
+  }
+  if (event.altKey) {
+    modifiers.push("Alt");
+  }
+  if (event.shiftKey) {
+    modifiers.push("Shift");
+  }
+
+  let normalizedKey = SHORTCUT_KEY_LABELS[key] ?? key;
+  if (normalizedKey.length === 1) {
+    normalizedKey = normalizedKey.toUpperCase();
+  } else if (!SHORTCUT_KEY_LABELS[key]) {
+    normalizedKey = normalizedKey.charAt(0).toUpperCase() + normalizedKey.slice(1);
+  }
+
+  return [...modifiers, normalizedKey].join("+");
+}
+
+function AudioSetupStep(props: {
+  permissions: OnboardingFormData["permissions"];
+  shortcutBehavior: string;
+  permissionErrors: StepErrors;
+  preferenceErrors: StepErrors;
+  checkingStatus: boolean;
   onRequestMicrophoneAccess: () => Promise<void>;
   onCheckMicrophoneStatus: () => Promise<void>;
   onOpenMicrophoneSettings: () => Promise<void>;
@@ -111,34 +178,71 @@ function PermissionStep(props: {
   onValidateBrowserProfileId: () => Promise<void>;
   checkingBrowserProfile: boolean;
   browserProfileConnected: boolean;
-  checkingStatus: boolean;
+  onShortcutBehaviorChange: (value: string) => void;
 }) {
-  return (
-    <div className="permission-stack">
-      <div className="permission-item">
-        <div>
-          <h3 className="permission-item-title">Allow Murmur to assist</h3>
-          <p className="permission-item-copy">Enable helper prompts and contextual guidance while you work.</p>
-        </div>
-        <button
-          type="button"
-          className={`permission-toggle ${props.data.assistantAccess === "granted" ? "permission-toggle-on" : ""}`}
-          aria-label="Allow Murmur to assist"
-          onClick={() => {
-            props.onAssistantAccessChange(props.data.assistantAccess === "granted" ? "pending" : "granted");
-          }}
-          aria-pressed={props.data.assistantAccess === "granted"}
-        />
-      </div>
+  const [isCapturingShortcut, setIsCapturingShortcut] = useState(false);
 
-      <div className="permission-item">
+  const shortcutDescribedBy = [
+    "shortcut-behavior-hint",
+    props.preferenceErrors.shortcutBehavior ? "shortcut-behavior-error" : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  useEffect(() => {
+    if (!isCapturingShortcut) {
+      return;
+    }
+
+    const handleShortcutKeyDown = (event: KeyboardEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (event.key === "Escape") {
+        setIsCapturingShortcut(false);
+        return;
+      }
+
+      if (!event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && event.key === "Backspace") {
+        props.onShortcutBehaviorChange("");
+        setIsCapturingShortcut(false);
+        return;
+      }
+
+      const shortcut = formatShortcutFromKeyDown(event);
+      if (!shortcut) {
+        return;
+      }
+
+      props.onShortcutBehaviorChange(shortcut);
+      setIsCapturingShortcut(false);
+    };
+
+    window.addEventListener("keydown", handleShortcutKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleShortcutKeyDown);
+    };
+  }, [isCapturingShortcut, props.onShortcutBehaviorChange]);
+
+  const handleRecordButtonClick = () => {
+    props.onShortcutBehaviorChange("");
+    setIsCapturingShortcut((previous) => !previous);
+  };
+
+  const shortcutParts = props.shortcutBehavior
+    .split("+")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  return (
+    <div className="onboarding-fields">
+      <div className="permission-item permission-item-minimal voice-setup-microphone-block">
         <div>
-          <h3 className="permission-item-title">Allow microphone access</h3>
-          <p className="permission-item-copy">Murmur needs microphone access to capture voice commands.</p>
-          <p className="permission-status">Status: {MICROPHONE_STATUS_LABEL[props.data.microphoneAccess]}</p>
-          <InlineError id="microphone-access-error" message={props.errors.microphoneAccess} />
+          <h3 className="permission-item-title">Microphone access</h3>
+          <p className="permission-status">Status: {MICROPHONE_STATUS_LABEL[props.permissions.microphoneAccess]}</p>
+          <InlineError id="microphone-access-error" message={props.permissionErrors.microphoneAccess} />
         </div>
-        <div className="permission-item-actions">
+        <div className="permission-item-actions voice-setup-microphone-actions">
           <button
             type="button"
             className="button button-primary"
@@ -146,7 +250,7 @@ function PermissionStep(props: {
               void props.onRequestMicrophoneAccess();
             }}
           >
-            Request access
+            Allow
           </button>
           <button
             type="button"
@@ -165,238 +269,62 @@ function PermissionStep(props: {
               void props.onOpenMicrophoneSettings();
             }}
           >
-            Open settings
+            Settings
           </button>
         </div>
       </div>
 
-      <div className="permission-item">
-        <div>
-          <h3 className="permission-item-title">Allow screen context</h3>
-          <p className="permission-item-copy">Optional: let Murmur understand what is on-screen for better responses.</p>
+      <div className="field">
+        <span className="field-label">Audio pill keybind</span>
+        <div className="shortcut-capture-row">
+          <button
+            type="button"
+            className={`button button-danger shortcut-record-button ${isCapturingShortcut ? "shortcut-record-button-active" : ""}`}
+            onClick={handleRecordButtonClick}
+            aria-pressed={isCapturingShortcut}
+            aria-label={isCapturingShortcut ? "Stop recording shortcut" : "Record shortcut"}
+            title={isCapturingShortcut ? "Stop recording shortcut" : "Record shortcut"}
+          >
+            <span className="shortcut-record-symbol" aria-hidden="true">{isCapturingShortcut ? "■" : "●"}</span>
+          </button>
+          <div
+            className={`shortcut-keybind-display ${isCapturingShortcut ? "shortcut-keybind-display-active" : ""}`}
+            aria-invalid={Boolean(props.preferenceErrors.shortcutBehavior)}
+            aria-describedby={shortcutDescribedBy}
+            aria-label={isCapturingShortcut ? "Listening for keybind input" : "Current keybind display"}
+          >
+            {shortcutParts.length > 0 ? (
+              <span className="shortcut-keycaps">
+                {shortcutParts.map((part, index) => (
+                  <span key={`${part}-${index}`} className="shortcut-keycap-group">
+                    {index > 0 && <span className="shortcut-keycap-plus">+</span>}
+                    <kbd className="shortcut-keycap">{part}</kbd>
+                  </span>
+                ))}
+              </span>
+            ) : (
+              <span className="shortcut-keybind-empty">
+                {isCapturingShortcut ? "Press keys..." : "No keybind set"}
+              </span>
+            )}
+          </div>
+          <button
+            type="button"
+            className="button button-secondary shortcut-reset-button"
+            onClick={() => {
+              props.onShortcutBehaviorChange(DEFAULT_SHORTCUT);
+              setIsCapturingShortcut(false);
+            }}
+          >
+            Reset to default
+          </button>
         </div>
-        <button
-          type="button"
-          className={`permission-toggle ${props.data.screenAccess === "granted" ? "permission-toggle-on" : ""}`}
-          aria-label="Allow screen context"
-          onClick={() => {
-            props.onScreenAccessChange(props.data.screenAccess === "granted" ? "pending" : "granted");
-          }}
-          aria-pressed={props.data.screenAccess === "granted"}
-        />
+        <p id="shortcut-behavior-hint" className="field-hint">
+          Press Record to update key combo.
+        </p>
+        <InlineError id="shortcut-behavior-error" message={props.preferenceErrors.shortcutBehavior} />
       </div>
 
-      <div className="permission-item">
-        <div>
-          <h3 className="permission-item-title">Connect Browser Profile</h3>
-          <p className="permission-item-copy">
-            Sync your local Chrome cookies to Browser Use, then paste the profile ID so Murmur can reuse your logged-in sessions.
-          </p>
-          <label className="field">
-            <span className="field-label">Browser Use API key</span>
-            <input
-              type="password"
-              value={props.browserUseApiKey}
-              onChange={(event) => {
-                props.onBrowserUseApiKeyChange(event.target.value);
-              }}
-              placeholder="bu_..."
-            />
-          </label>
-          <p className="permission-item-copy">
-            Tutorial:
-          </p>
-          <ol className="permission-item-copy">
-            <li>Open Browser Use settings and copy your API key.</li>
-            <li>Paste the key above and click Sync Automatically.</li>
-            <li>In the opened browser, select the accounts to sync.</li>
-            <li>If the profile ID is not auto-detected, paste it below and click Verify profile.</li>
-          </ol>
-          <p className="permission-status">
-            Sync command: <code>{BROWSER_PROFILE_SYNC_COMMAND}</code>
-          </p>
-          <p className="permission-status">
-            Status: {props.browserProfileConnected ? "Connected" : "Not connected"}
-          </p>
-          <label className="field">
-            <span className="field-label">Browser Use profile ID</span>
-            <input
-              type="text"
-              value={props.data.browserProfileId}
-              onChange={(event) => {
-                props.onBrowserProfileIdChange(event.target.value);
-              }}
-              placeholder="3c90c3cc-0d44-4b50-8888-8dd25736052a"
-              aria-invalid={Boolean(props.errors.browserProfileId)}
-              aria-describedby={props.errors.browserProfileId ? "browser-profile-id-error" : undefined}
-            />
-            <InlineError id="browser-profile-id-error" message={props.errors.browserProfileId} />
-          </label>
-        </div>
-        <div className="permission-item-actions">
-          <button
-            type="button"
-            className="button button-primary"
-            onClick={() => {
-              void props.onStartAutomaticBrowserProfileSync();
-            }}
-            disabled={props.runningAutomaticSync}
-          >
-            {props.runningAutomaticSync ? "Syncing..." : "Sync Automatically"}
-          </button>
-          <button
-            type="button"
-            className="button button-secondary"
-            onClick={() => {
-              void props.onOpenBrowserUseSettings();
-            }}
-          >
-            Open Browser Use Settings
-          </button>
-          <button
-            type="button"
-            className="button button-secondary"
-            onClick={() => {
-              void props.onCopyBrowserProfileSyncCommand();
-            }}
-          >
-            Copy Sync Command
-          </button>
-          <button
-            type="button"
-            className="button button-secondary"
-            onClick={() => {
-              void props.onOpenBrowserProfileSyncGuide();
-            }}
-          >
-            Open Sync Guide
-          </button>
-          <button
-            type="button"
-            className="button button-primary"
-            onClick={() => {
-              void props.onValidateBrowserProfileId();
-            }}
-            disabled={props.checkingBrowserProfile}
-          >
-            {props.checkingBrowserProfile ? "Verifying..." : "Verify profile"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function AccountStep(props: {
-  data: OnboardingFormData["account"];
-  errors: StepErrors;
-  onDisplayNameChange: (value: string) => void;
-  onWorkspaceNameChange: (value: string) => void;
-}) {
-  return (
-    <div className="onboarding-fields">
-      <label className="field">
-        <span className="field-label">Display name (placeholder)</span>
-        <input
-          type="text"
-          value={props.data.displayName}
-          onChange={(event) => props.onDisplayNameChange(event.target.value)}
-          placeholder="Alex Rivera"
-          aria-invalid={Boolean(props.errors.displayName)}
-          aria-describedby={props.errors.displayName ? "display-name-error" : undefined}
-        />
-        <InlineError id="display-name-error" message={props.errors.displayName} />
-      </label>
-
-      <label className="field">
-        <span className="field-label">Workspace name (placeholder)</span>
-        <input
-          type="text"
-          value={props.data.workspaceName}
-          onChange={(event) => props.onWorkspaceNameChange(event.target.value)}
-          placeholder="Murmur Team"
-          aria-invalid={Boolean(props.errors.workspaceName)}
-          aria-describedby={props.errors.workspaceName ? "workspace-name-error" : undefined}
-        />
-        <InlineError id="workspace-name-error" message={props.errors.workspaceName} />
-      </label>
-    </div>
-  );
-}
-
-function WorkflowStep(props: {
-  data: OnboardingFormData["workflow"];
-  errors: StepErrors;
-  onPrimaryGoalChange: (value: string) => void;
-  onUseCasesChange: (value: string) => void;
-}) {
-  return (
-    <div className="onboarding-fields">
-      <label className="field">
-        <span className="field-label">Primary goal (placeholder)</span>
-        <textarea
-          value={props.data.primaryGoal}
-          onChange={(event) => props.onPrimaryGoalChange(event.target.value)}
-          rows={3}
-          placeholder="What should Murmur help you accomplish first?"
-          className="resizable-textarea"
-          aria-invalid={Boolean(props.errors.primaryGoal)}
-          aria-describedby={props.errors.primaryGoal ? "primary-goal-error" : undefined}
-        />
-        <InlineError id="primary-goal-error" message={props.errors.primaryGoal} />
-      </label>
-
-      <label className="field">
-        <span className="field-label">Frequent use cases (placeholder)</span>
-        <textarea
-          value={props.data.useCases}
-          onChange={(event) => props.onUseCasesChange(event.target.value)}
-          rows={3}
-          placeholder="Describe the top scenarios you expect to use."
-          className="resizable-textarea"
-          aria-invalid={Boolean(props.errors.useCases)}
-          aria-describedby={props.errors.useCases ? "use-cases-error" : undefined}
-        />
-        <InlineError id="use-cases-error" message={props.errors.useCases} />
-      </label>
-    </div>
-  );
-}
-
-function PreferencesStep(props: {
-  data: OnboardingFormData["preferences"];
-  errors: StepErrors;
-  onShortcutBehaviorChange: (value: string) => void;
-  onNotesChange: (value: string) => void;
-}) {
-  return (
-    <div className="onboarding-fields">
-      <label className="field">
-        <span className="field-label">Shortcut preference (placeholder)</span>
-        <input
-          type="text"
-          value={props.data.shortcutBehavior}
-          onChange={(event) => props.onShortcutBehaviorChange(event.target.value)}
-          placeholder="Open instantly with context from current app"
-          aria-invalid={Boolean(props.errors.shortcutBehavior)}
-          aria-describedby={props.errors.shortcutBehavior ? "shortcut-behavior-error" : undefined}
-        />
-        <InlineError id="shortcut-behavior-error" message={props.errors.shortcutBehavior} />
-      </label>
-
-      <label className="field">
-        <span className="field-label">Additional notes (placeholder)</span>
-        <textarea
-          value={props.data.notes}
-          onChange={(event) => props.onNotesChange(event.target.value)}
-          rows={4}
-          placeholder="Any preferences to keep for future onboarding fields."
-          className="resizable-textarea"
-          aria-invalid={Boolean(props.errors.notes)}
-          aria-describedby={props.errors.notes ? "notes-error" : undefined}
-        />
-        <InlineError id="notes-error" message={props.errors.notes} />
-      </label>
     </div>
   );
 }
@@ -417,19 +345,7 @@ export function OnboardingGateScaffold({ onCompleted, initialLoadError }: Onboar
   const [browserUseApiKey, setBrowserUseApiKey] = useState("");
   const [isRunningAutomaticSync, setIsRunningAutomaticSync] = useState(false);
 
-  const handleBrowserUseApiKeyChange = (value: string) => {
-    setBrowserUseApiKey(value);
-    const trimmed = value.trim();
-    if (!trimmed) {
-      void persistBrowserUseApiKey(null);
-      return;
-    }
-
-    const normalized = normalizeBrowserUseApiKey(value);
-    if (normalized) {
-      void persistBrowserUseApiKey(normalized);
-    }
-  };
+  const activeStep = STEP_META[currentStep];
 
   const setMicrophoneAccess = (value: MicrophoneAccessStatus) => {
     setFormData((previous) => ({
@@ -692,7 +608,7 @@ export function OnboardingGateScaffold({ onCompleted, initialLoadError }: Onboar
   }, [onCompleted, supabase, user]);
 
   useEffect(() => {
-    if (currentStep !== 0) {
+    if (currentStep !== SAFE_PERMISSIONS_STEP_INDEX) {
       return;
     }
 
@@ -703,20 +619,9 @@ export function OnboardingGateScaffold({ onCompleted, initialLoadError }: Onboar
     void checkMicrophoneStatus();
   }, [currentStep]);
 
-  const activeStep = STEP_META[currentStep];
-  const assistantEnabled = formData.permissions.assistantAccess === "granted";
-  const microphoneReady = isMicrophoneAccessSatisfied(formData.permissions.microphoneAccess);
-  const screenEnabled = formData.permissions.screenAccess === "granted";
   const browserProfileConnected = Boolean(
     normalizeBrowserProfileId(formData.permissions.browserProfileId)
   );
-  const permissionProgressCount = [
-    assistantEnabled,
-    microphoneReady,
-    screenEnabled,
-    browserProfileConnected,
-  ].filter(Boolean).length;
-
   const persistProgress = async (options: { completed: boolean; completedAt: string | null; nextStep: number }) => {
     if (!user) {
       throw new Error("You must be signed in to save onboarding.");
@@ -743,33 +648,34 @@ export function OnboardingGateScaffold({ onCompleted, initialLoadError }: Onboar
     await persistBrowserProfileId(
       normalizeBrowserProfileId(formData.permissions.browserProfileId)
     );
-    await persistBrowserUseApiKey(normalizeBrowserUseApiKey(browserUseApiKey));
   };
 
   const applyValidationForCurrentStep = (): boolean => {
-    const key = activeStep.key;
-    const validation = validateStep(key, formData);
+    if (activeStep.key === "permissions") {
+      const permissionValidation = validateStep("permissions", formData);
+      const preferenceValidation = validateStep("preferences", formData);
+      const preferenceErrors: StepErrors = {};
+
+      if (preferenceValidation.shortcutBehavior) {
+        preferenceErrors.shortcutBehavior = preferenceValidation.shortcutBehavior;
+      }
+
+      setStepErrors((previous) => ({
+        ...previous,
+        permissions: permissionValidation,
+        preferences: preferenceErrors,
+      }));
+
+      return Object.keys(permissionValidation).length === 0 && Object.keys(preferenceErrors).length === 0;
+    }
+
+    const validation = validateStep(activeStep.key, formData);
     setStepErrors((previous) => ({
       ...previous,
-      [key]: validation,
+      [activeStep.key]: validation,
     }));
 
     return Object.keys(validation).length === 0;
-  };
-
-  const handleSaveProgress = async () => {
-    setSaveError(null);
-    setStatusMessage(null);
-    setIsSaving(true);
-
-    try {
-      await persistProgress({ completed: false, completedAt: null, nextStep: currentStep });
-      setStatusMessage("Progress saved.");
-    } catch (error) {
-      setSaveError(error instanceof Error ? error.message : "Failed to save progress.");
-    } finally {
-      setIsSaving(false);
-    }
   };
 
   const handleNext = async () => {
@@ -785,7 +691,6 @@ export function OnboardingGateScaffold({ onCompleted, initialLoadError }: Onboar
     try {
       await persistProgress({ completed: false, completedAt: null, nextStep });
       setCurrentStep(nextStep);
-      setStatusMessage("Progress saved.");
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "Failed to save progress.");
     } finally {
@@ -829,7 +734,7 @@ export function OnboardingGateScaffold({ onCompleted, initialLoadError }: Onboar
     }
 
     if (!isMicrophoneAccessSatisfied(formData.permissions.microphoneAccess)) {
-      setCurrentStep(0);
+      setCurrentStep(SAFE_PERMISSIONS_STEP_INDEX);
       setSaveError("Please enable microphone access before completing onboarding.");
       return;
     }
@@ -841,7 +746,6 @@ export function OnboardingGateScaffold({ onCompleted, initialLoadError }: Onboar
     try {
       const completedAt = new Date().toISOString();
       await persistProgress({ completed: true, completedAt, nextStep: LAST_STEP_INDEX });
-      setStatusMessage("Onboarding completed.");
       onCompleted();
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "Failed to complete onboarding.");
@@ -860,27 +764,12 @@ export function OnboardingGateScaffold({ onCompleted, initialLoadError }: Onboar
 
   return (
     <div className="screen onboarding-screen">
-      <div className="onboarding-shell">
+      <div className="onboarding-shell onboarding-shell-minimal">
         <div className="panel onboarding-card onboarding-main">
-          <header className="onboarding-header">
-            <p className="eyebrow">
-              First-time setup
-            </p>
-            <h1 className="onboarding-title">Let&apos;s get you set up</h1>
-            <p>
-              Configure your workspace in a few steps. You can save progress and return anytime.
-            </p>
-            <ol className="step-pills" aria-label="Onboarding steps">
-              {STEP_META.map((step, index) => (
-                <li
-                  key={step.key}
-                  className={`step-pill ${index === currentStep ? "step-pill-active" : ""}`}
-                  aria-current={index === currentStep ? "step" : undefined}
-                >
-                  {index + 1}. {step.title}
-                </li>
-              ))}
-            </ol>
+          <header className="onboarding-header onboarding-header-minimal">
+            <p className="eyebrow">Quick setup</p>
+            <h1 className="onboarding-title">Set up Murmur</h1>
+            <p className="onboarding-step-progress">Step {currentStep + 1} of {STEP_META.length}</p>
           </header>
 
           <section className="section-card onboarding-form-card">
@@ -889,38 +778,6 @@ export function OnboardingGateScaffold({ onCompleted, initialLoadError }: Onboar
               <p>{activeStep.description}</p>
             </div>
 
-            {activeStep.key === "permissions" && (
-              <PermissionStep
-                data={formData.permissions}
-                errors={stepErrors.permissions}
-                onAssistantAccessChange={(value) => {
-                  updateStepField("permissions", "assistantAccess", value);
-                }}
-                onScreenAccessChange={(value) => {
-                  updateStepField("permissions", "screenAccess", value);
-                }}
-                onRequestMicrophoneAccess={requestMicrophoneAccess}
-                onCheckMicrophoneStatus={checkMicrophoneStatus}
-                onOpenMicrophoneSettings={openMicrophoneSettings}
-                onBrowserProfileIdChange={(value) => {
-                  updateStepField("permissions", "browserProfileId", value);
-                }}
-                browserUseApiKey={browserUseApiKey}
-                onBrowserUseApiKeyChange={(value) => {
-                  handleBrowserUseApiKeyChange(value);
-                }}
-                onStartAutomaticBrowserProfileSync={startAutomaticBrowserProfileSync}
-                runningAutomaticSync={isRunningAutomaticSync}
-                onOpenBrowserUseSettings={openBrowserUseSettings}
-                onCopyBrowserProfileSyncCommand={copyBrowserProfileSyncCommand}
-                onOpenBrowserProfileSyncGuide={openBrowserProfileSyncGuide}
-                onValidateBrowserProfileId={validateBrowserProfileId}
-                checkingBrowserProfile={isCheckingBrowserProfile}
-                browserProfileConnected={browserProfileConnected}
-                checkingStatus={isCheckingPermission}
-              />
-            )}
-
             {activeStep.key === "account" && (
               <AccountStep
                 data={formData.account}
@@ -928,35 +785,37 @@ export function OnboardingGateScaffold({ onCompleted, initialLoadError }: Onboar
                 onDisplayNameChange={(value) => {
                   updateStepField("account", "displayName", value);
                 }}
-                onWorkspaceNameChange={(value) => {
-                  updateStepField("account", "workspaceName", value);
-                }}
               />
             )}
 
-            {activeStep.key === "workflow" && (
-              <WorkflowStep
-                data={formData.workflow}
-                errors={stepErrors.workflow}
-                onPrimaryGoalChange={(value) => {
-                  updateStepField("workflow", "primaryGoal", value);
-                }}
-                onUseCasesChange={(value) => {
-                  updateStepField("workflow", "useCases", value);
-                }}
-              />
-            )}
-
-            {activeStep.key === "preferences" && (
-              <PreferencesStep
-                data={formData.preferences}
-                errors={stepErrors.preferences}
+            {activeStep.key === "permissions" && (
+              <AudioSetupStep
+                permissions={formData.permissions}
+                shortcutBehavior={formData.preferences.shortcutBehavior}
+                permissionErrors={stepErrors.permissions}
+                preferenceErrors={stepErrors.preferences}
+                checkingStatus={isCheckingPermission}
+                onRequestMicrophoneAccess={requestMicrophoneAccess}
+                onCheckMicrophoneStatus={checkMicrophoneStatus}
+                onOpenMicrophoneSettings={openMicrophoneSettings}
                 onShortcutBehaviorChange={(value) => {
                   updateStepField("preferences", "shortcutBehavior", value);
                 }}
-                onNotesChange={(value) => {
-                  updateStepField("preferences", "notes", value);
+                browserUseApiKey={browserUseApiKey}
+                onBrowserUseApiKeyChange={(value) => {
+                  setBrowserUseApiKey(value);
                 }}
+                onStartAutomaticBrowserProfileSync={startAutomaticBrowserProfileSync}
+                runningAutomaticSync={isRunningAutomaticSync}
+                onBrowserProfileIdChange={(value) => {
+                  updateStepField("permissions", "browserProfileId", value);
+                }}
+                onOpenBrowserUseSettings={openBrowserUseSettings}
+                onCopyBrowserProfileSyncCommand={copyBrowserProfileSyncCommand}
+                onOpenBrowserProfileSyncGuide={openBrowserProfileSyncGuide}
+                onValidateBrowserProfileId={validateBrowserProfileId}
+                checkingBrowserProfile={isCheckingBrowserProfile}
+                browserProfileConnected={browserProfileConnected}
               />
             )}
           </section>
@@ -964,7 +823,18 @@ export function OnboardingGateScaffold({ onCompleted, initialLoadError }: Onboar
           {statusMessage && <p className="alert alert-info">{statusMessage}</p>}
           {saveError && <p className="alert alert-danger">{saveError}</p>}
 
-          <footer className="footer-actions">
+          <footer className="footer-actions footer-actions-minimal">
+            <button
+              type="button"
+              onClick={() => {
+                void signOut();
+              }}
+              disabled={isSaving}
+              className="button button-secondary"
+            >
+              Sign out
+            </button>
+
             <div className="action-group">
               <button
                 type="button"
@@ -973,29 +843,6 @@ export function OnboardingGateScaffold({ onCompleted, initialLoadError }: Onboar
                 className="button button-secondary"
               >
                 Back
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  void handleSaveProgress();
-                }}
-                disabled={isSaving}
-                className="button button-secondary"
-              >
-                Save progress
-              </button>
-            </div>
-
-            <div className="action-group">
-              <button
-                type="button"
-                onClick={() => {
-                  void signOut();
-                }}
-                disabled={isSaving}
-                className="button button-secondary"
-              >
-                Sign out
               </button>
 
               {currentStep < LAST_STEP_INDEX ? (
@@ -1018,61 +865,12 @@ export function OnboardingGateScaffold({ onCompleted, initialLoadError }: Onboar
                   disabled={isSaving}
                   className="button button-primary"
                 >
-                  Complete onboarding
+                  Finish
                 </button>
               )}
             </div>
           </footer>
         </div>
-
-        <aside className="onboarding-visual" aria-label="Permission guidance preview">
-          <div className="permission-dialog">
-            <p className="permission-title">Enable system access for the best Murmur experience.</p>
-            <p className="permission-copy">
-              {permissionProgressCount}/4 setup checks complete. Confirm microphone and browser profile access so voice commands work reliably.
-            </p>
-            <div className="permission-actions">
-              <button
-                type="button"
-                className="button button-secondary"
-                onClick={() => {
-                  void openMicrophoneSettings();
-                }}
-              >
-                Open System Settings
-              </button>
-              <button
-                type="button"
-                className="button button-primary"
-                onClick={() => {
-                  void requestMicrophoneAccess();
-                }}
-              >
-                Allow Microphone
-              </button>
-            </div>
-          </div>
-
-          <div className="system-preview">
-            <div className="system-header">Accessibility</div>
-            <div className={`system-row ${assistantEnabled ? "system-row-active" : ""}`}>
-              <span>Assistant</span>
-              <span className={`system-toggle ${assistantEnabled ? "system-toggle-on" : ""}`} />
-            </div>
-            <div className={`system-row ${microphoneReady ? "system-row-active" : ""}`}>
-              <span>Microphone</span>
-              <span className={`system-toggle ${microphoneReady ? "system-toggle-on" : ""}`} />
-            </div>
-            <div className={`system-row ${screenEnabled ? "system-row-active" : ""}`}>
-              <span>Screen context</span>
-              <span className={`system-toggle ${screenEnabled ? "system-toggle-on" : ""}`} />
-            </div>
-            <div className={`system-row ${browserProfileConnected ? "system-row-active" : ""}`}>
-              <span>Browser profile</span>
-              <span className={`system-toggle ${browserProfileConnected ? "system-toggle-on" : ""}`} />
-            </div>
-          </div>
-        </aside>
       </div>
     </div>
   );

@@ -53,10 +53,6 @@ function required(value: string): string | null {
   return null;
 }
 
-function minLength(min: number, message: string): FieldValidator {
-  return (value) => (value.trim().length < min ? message : null);
-}
-
 function maxLength(max: number, message: string): FieldValidator {
   return (value) => (value.trim().length > max ? message : null);
 }
@@ -88,11 +84,11 @@ const SCHEMA: {
   },
   account: {
     displayName: [required, maxLength(80, "Display name must be 80 characters or fewer.")],
-    workspaceName: [required, maxLength(120, "Workspace name must be 120 characters or fewer.")],
+    workspaceName: [maxLength(120, "Workspace name must be 120 characters or fewer.")],
   },
   workflow: {
-    primaryGoal: [required, minLength(10, "Please add at least 10 characters.")],
-    useCases: [required, minLength(10, "Please add at least 10 characters.")],
+    primaryGoal: [maxLength(240, "Primary goal must be 240 characters or fewer.")],
+    useCases: [maxLength(240, "Use cases must be 240 characters or fewer.")],
   },
   preferences: {
     shortcutBehavior: [required, maxLength(120, "Shortcut preference must be 120 characters or fewer.")],
@@ -100,7 +96,7 @@ const SCHEMA: {
   },
 };
 
-export const STEP_ORDER: StepKey[] = ["permissions", "account", "workflow", "preferences"];
+export const STEP_ORDER: StepKey[] = ["account", "permissions"];
 
 export function createDefaultOnboardingData(): OnboardingFormData {
   return {
@@ -119,7 +115,7 @@ export function createDefaultOnboardingData(): OnboardingFormData {
       useCases: "",
     },
     preferences: {
-      shortcutBehavior: "",
+      shortcutBehavior: "Cmd+Shift+Space",
       notes: "",
     },
   };
@@ -141,6 +137,10 @@ export function mergePersistedOnboardingData(raw: unknown): OnboardingFormData {
   const workflow = steps.workflow ?? {};
   const preferences = steps.preferences ?? {};
   const permissions = steps.permissions ?? {};
+  const persistedShortcutBehavior =
+    typeof preferences.shortcutBehavior === "string" && preferences.shortcutBehavior.trim().length > 0
+      ? preferences.shortcutBehavior
+      : defaults.preferences.shortcutBehavior;
 
   const persistedMicrophoneAccess =
     typeof permissions.microphoneAccess === "string" ? permissions.microphoneAccess : "not-determined";
@@ -175,10 +175,7 @@ export function mergePersistedOnboardingData(raw: unknown): OnboardingFormData {
       useCases: typeof workflow.useCases === "string" ? workflow.useCases : defaults.workflow.useCases,
     },
     preferences: {
-      shortcutBehavior:
-        typeof preferences.shortcutBehavior === "string"
-          ? preferences.shortcutBehavior
-          : defaults.preferences.shortcutBehavior,
+      shortcutBehavior: persistedShortcutBehavior,
       notes: typeof preferences.notes === "string" ? preferences.notes : defaults.preferences.notes,
     },
   };
@@ -227,7 +224,7 @@ export function validateStep(step: StepKey, data: OnboardingFormData): StepError
 
 export function createPayload(currentStep: number, data: OnboardingFormData): OnboardingPayload {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     currentStep,
     steps: data,
   };
