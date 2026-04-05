@@ -5,6 +5,8 @@ import {
   app,
   BrowserWindow,
   Menu,
+  Tray,
+  nativeImage,
   globalShortcut,
   ipcMain,
   screen,
@@ -16,7 +18,6 @@ import {
 import { readSupabasePublicConfig, type SupabasePublicConfig } from "./supabaseConfig";
 import { createMainWindow, getMainWindow } from "./windows/mainWindow";
 import { createVoicePopoverWindow } from "./windows/voicePopoverWindow";
-import { BACKGROUND_BLUR_GRACE_PERIOD_MS, shouldHideVoicePopoverOnBlur } from "./voicePopoverBehavior";
 import { isMicrophonePermission, isTrustedMicrophoneRequest } from "./permissions/mediaPermissions";
 import { PendingOAuthCallbackStore } from "./oauthCallback";
 
@@ -59,12 +60,28 @@ function suppressKnownMacOsElectronMenuWarning(): void {
 suppressKnownMacOsElectronMenuWarning();
 
 let appReady = false;
+let isQuitting = false;
+let tray: Tray | null = null;
 const pendingOAuthCallbackStore = new PendingOAuthCallbackStore();
 let volatileSessionStore: SessionStoreData = {};
 let voicePopoverWindow: BrowserWindow | null = null;
 let voicePopoverOpenedAtMs: number | null = null;
 let voicePopoverOpenedFromBackground = false;
 let pendingVoicePopoverBlurHideTimer: NodeJS.Timeout | null = null;
+// Module-level so hideVoicePopover / showVoicePopover can always cancel it.
+let repositionAnimationId: ReturnType<typeof setInterval> | null = null;
+// Track our *intent* to show the popover independently of OS/workspace
+// visibility, which can flicker to false when switching Spaces on macOS.
+// IPC handlers that reposition/resize/close should respect this flag so they
+// don't operate on a window the user has already dismissed.
+let voicePopoverIntentVisible = false;
+
+function cancelRepositionAnimation(): void {
+  if (repositionAnimationId !== null) {
+    clearInterval(repositionAnimationId);
+    repositionAnimationId = null;
+  }
+}
 
 const GLOBAL_SHORTCUT = "CommandOrControl+Shift+Space";
 const DASHBOARD_SHORTCUT = "CommandOrControl+Shift+M";
@@ -538,72 +555,81 @@ function getOrCreateVoicePopover(): BrowserWindow {
   }
 
   voicePopoverWindow = createVoicePopoverWindow();
-  voicePopoverWindow.on("blur", () => {
-    if (!voicePopoverWindow || voicePopoverWindow.isDestroyed() || !voicePopoverWindow.isVisible()) {
-      return;
-    }
 
-    const millisecondsSinceShow = voicePopoverOpenedAtMs === null ? Number.POSITIVE_INFINITY : Date.now() - voicePopoverOpenedAtMs;
-    const shouldHide = shouldHideVoicePopoverOnBlur({
-      openedFromBackground: voicePopoverOpenedFromBackground,
-      millisecondsSinceShow,
-    });
+  // Never auto-hide on blur — the overlay is user-controlled via the global
+  // shortcut (toggle) or Escape. Auto-hiding on blur caused races with
+  // app.focus(), unexpected dismissals when switching windows, and conflicts
+  // with the reposition animation still running after hide.
 
-    if (shouldHide) {
-      hideVoicePopover();
-      return;
-    }
-
-    if (voicePopoverOpenedFromBackground) {
-      return;
-    }
-
-    if (pendingVoicePopoverBlurHideTimer !== null) {
-      clearTimeout(pendingVoicePopoverBlurHideTimer);
-    }
-
-    const remainingGraceMs = Math.max(0, BACKGROUND_BLUR_GRACE_PERIOD_MS - millisecondsSinceShow);
-    pendingVoicePopoverBlurHideTimer = setTimeout(() => {
-      pendingVoicePopoverBlurHideTimer = null;
-
-      if (!voicePopoverWindow || voicePopoverWindow.isDestroyed() || !voicePopoverWindow.isVisible()) {
-        return;
-      }
-
-      if (!voicePopoverWindow.isFocused()) {
-        hideVoicePopover();
-      }
-    }, remainingGraceMs);
-  });
   voicePopoverWindow.on("closed", () => {
     if (pendingVoicePopoverBlurHideTimer !== null) {
       clearTimeout(pendingVoicePopoverBlurHideTimer);
       pendingVoicePopoverBlurHideTimer = null;
     }
 
+    cancelRepositionAnimation();
     voicePopoverOpenedAtMs = null;
     voicePopoverOpenedFromBackground = false;
+    voicePopoverIntentVisible = false;
     voicePopoverWindow = null;
   });
 
   return voicePopoverWindow;
 }
 
-function toggleVoicePopover(): void {
+function showVoicePopover(): void {
   const win = getOrCreateVoicePopover();
 
-  if (win.isVisible()) {
+  if (pendingVoicePopoverBlurHideTimer !== null) {
+    clearTimeout(pendingVoicePopoverBlurHideTimer);
+    pendingVoicePopoverBlurHideTimer = null;
+  }
+
+  // Cancel any reposition animation that was running from a previous session —
+  // this is the main cause of "unexpected location" bugs on re-toggle.
+  cancelRepositionAnimation();
+
+  voicePopoverOpenedAtMs = Date.now();
+  voicePopoverOpenedFromBackground = BrowserWindow.getFocusedWindow() === null;
+
+  // Snap to a clean centered position and reset to base height BEFORE show()
+  // so the window never flashes at the wrong size or position.
+  snapPopoverToCenter();
+
+  // Mark intent BEFORE show() so that any IPC that fires immediately after
+  // (e.g. from the renderer's mount effects) sees the correct state.
+  voicePopoverIntentVisible = true;
+
+  // Re-assert the window level — macOS can reset it between shows.
+  win.setAlwaysOnTop(true, "screen-saver");
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+
+  // Activate the Electron app BEFORE show+focus so macOS doesn't give focus
+  // back to the previously active app after win.focus().
+  if (process.platform === "darwin") {
+    app.focus({ steal: true });
+  } else {
+    app.focus();
+  }
+
+  win.show();
+  win.moveTop();
+  win.focus();
+
+  // Notify the renderer that the popover was just shown so it can re-apply
+  // the correct window size (e.g. when a response card is already visible).
+  win.webContents.send("popover:did-show");
+}
+
+function toggleVoicePopover(): void {
+  // Use voicePopoverIntentVisible rather than win.isVisible() because macOS
+  // can mark the window as not-visible when switching Spaces even though we
+  // intentionally showed it. Relying on isVisible() causes double-show or
+  // double-hide races when the user switches windows and re-triggers.
+  if (voicePopoverIntentVisible) {
     hideVoicePopover();
   } else {
-    if (pendingVoicePopoverBlurHideTimer !== null) {
-      clearTimeout(pendingVoicePopoverBlurHideTimer);
-      pendingVoicePopoverBlurHideTimer = null;
-    }
-
-    voicePopoverOpenedAtMs = Date.now();
-    voicePopoverOpenedFromBackground = BrowserWindow.getFocusedWindow() === null;
-    win.show();
-    win.focus();
+    showVoicePopover();
   }
 }
 
@@ -631,12 +657,46 @@ function hideVoicePopover(): void {
     pendingVoicePopoverBlurHideTimer = null;
   }
 
+  // Always cancel any in-progress reposition animation before hiding.
+  // If left running, it continues moving the window while hidden and causes
+  // "unexpected location" on the next show.
+  cancelRepositionAnimation();
+
+  // Mark intent BEFORE hide() so that any in-flight IPC from the renderer
+  // (repositionPopover, resizePopover) that arrives after we call hide()
+  // is correctly ignored.
+  voicePopoverIntentVisible = false;
+
   voicePopoverOpenedAtMs = null;
   voicePopoverOpenedFromBackground = false;
 
-  if (voicePopoverWindow && !voicePopoverWindow.isDestroyed() && voicePopoverWindow.isVisible()) {
+  if (voicePopoverWindow && !voicePopoverWindow.isDestroyed()) {
+    // Reset to base size before hiding so the next show() starts clean.
+    voicePopoverWindow.setSize(POPOVER_WIDTH, POPOVER_HEIGHT_BASE);
+    // hide() is safe to call even if the window is already hidden.
     voicePopoverWindow.hide();
   }
+}
+
+const POPOVER_WIDTH = 430;
+const POPOVER_HEIGHT_BASE = 130;
+const PILL_TOP_OFFSET = 42; // padding(8) + half pill height(34)
+
+/** Returns the work-area of whichever display the cursor is currently on. */
+function getActiveWorkArea(): Electron.Rectangle {
+  const cursor = screen.getCursorScreenPoint();
+  const display = screen.getDisplayNearestPoint(cursor);
+  return display.workArea;
+}
+
+/** Snaps the popover to its centered home position on the active display, no animation. */
+function snapPopoverToCenter(): void {
+  if (!voicePopoverWindow || voicePopoverWindow.isDestroyed()) return;
+  const { x: waX, y: waY, width: waW, height: waH } = getActiveWorkArea();
+  const x = Math.round(waX + (waW - POPOVER_WIDTH) / 2);
+  const y = Math.round(waY + waH * 0.75 - PILL_TOP_OFFSET);
+  voicePopoverWindow.setSize(POPOVER_WIDTH, POPOVER_HEIGHT_BASE);
+  voicePopoverWindow.setPosition(x, y);
 }
 
 function registerShortcutIpcHandlers(): void {
@@ -645,55 +705,48 @@ function registerShortcutIpcHandlers(): void {
   });
 
   ipcMain.handle("shortcut:show-popover", () => {
-    const win = getOrCreateVoicePopover();
-    if (!win.isVisible()) {
-      voicePopoverOpenedAtMs = Date.now();
-      voicePopoverOpenedFromBackground = BrowserWindow.getFocusedWindow() === null;
-      win.show();
+    if (!voicePopoverIntentVisible) {
+      showVoicePopover();
+    } else {
+      // Re-assert on top even if already visible (e.g. something covered it)
+      const win = getOrCreateVoicePopover();
+      win.setAlwaysOnTop(true, "screen-saver");
+      win.moveTop();
       win.focus();
     }
   });
 
-  let repositionAnimationId: ReturnType<typeof setInterval> | null = null;
-
   ipcMain.handle("shortcut:reposition-popover", (_event, position: "center" | "top-right") => {
-    if (!voicePopoverWindow || voicePopoverWindow.isDestroyed()) return;
-    const primaryDisplay = screen.getPrimaryDisplay();
-    const { x: waX, y: waY, width: waW, height: waH } = primaryDisplay.workArea;
-    const baseW = 430;
-    const baseH = 130;
+    // Guard: only reposition when we intentionally have the popover shown.
+    // If the window was hidden (e.g. user dismissed it) but the renderer fired
+    // a repositionPopover IPC before unmounting, ignore it completely.
+    if (!voicePopoverIntentVisible || !voicePopoverWindow || voicePopoverWindow.isDestroyed()) return;
+    const { x: waX, y: waY, width: waW, height: waH } = getActiveWorkArea();
 
     let targetX: number;
     let targetY: number;
     if (position === "top-right") {
-      targetX = Math.round(waX + waW - baseW - 16);
+      targetX = Math.round(waX + waW - POPOVER_WIDTH - 16);
       targetY = Math.round(waY + 16);
     } else {
-      // Anchor to the pill's vertical center on screen (padding 8 + half pill 34 = 42px from window top)
-      // This keeps the pill at the same Y regardless of whether the response card is open or not
-      const PILL_TOP_OFFSET = 42;
-      targetX = Math.round(waX + (waW - baseW) / 2);
+      targetX = Math.round(waX + (waW - POPOVER_WIDTH) / 2);
       targetY = Math.round(waY + waH * 0.75 - PILL_TOP_OFFSET);
     }
 
-    // Cancel any in-progress animation
-    if (repositionAnimationId !== null) {
-      clearInterval(repositionAnimationId);
-      repositionAnimationId = null;
-    }
+    // Cancel any in-progress animation before starting a new one.
+    cancelRepositionAnimation();
 
     const [startX, startY] = voicePopoverWindow.getPosition();
     const DURATION_MS = 380;
     const INTERVAL_MS = 10;
     const startTime = Date.now();
 
-    // Ease-out cubic: t=0→1, output=0→1 with deceleration
     const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
 
     repositionAnimationId = setInterval(() => {
-      if (!voicePopoverWindow || voicePopoverWindow.isDestroyed()) {
-        clearInterval(repositionAnimationId!);
-        repositionAnimationId = null;
+      // Stop immediately if the popover was hidden mid-animation.
+      if (!voicePopoverIntentVisible || !voicePopoverWindow || voicePopoverWindow.isDestroyed()) {
+        cancelRepositionAnimation();
         return;
       }
       const elapsed = Date.now() - startTime;
@@ -703,20 +756,21 @@ function registerShortcutIpcHandlers(): void {
       const y = Math.round(startY + (targetY - startY) * ease);
       voicePopoverWindow.setPosition(x, y);
       if (t >= 1) {
-        clearInterval(repositionAnimationId!);
-        repositionAnimationId = null;
+        cancelRepositionAnimation();
       }
     }, INTERVAL_MS);
   });
 
-  ipcMain.handle("shortcut:resize-popover", (_event, width: number, height: number) => {
-    if (!voicePopoverWindow || voicePopoverWindow.isDestroyed()) return;
-    const [oldW] = voicePopoverWindow.getSize();
+  ipcMain.handle("shortcut:resize-popover", (_event, width: number, height: number, anchorBottom?: boolean) => {
+    // Guard: ignore resize requests when the popover is not intentionally shown.
+    if (!voicePopoverIntentVisible || !voicePopoverWindow || voicePopoverWindow.isDestroyed()) return;
+    const [oldW, oldH] = voicePopoverWindow.getSize();
     const [oldX, oldY] = voicePopoverWindow.getPosition();
     voicePopoverWindow.setSize(Math.round(width), Math.round(height));
-    // Re-center horizontally after resize
     const dx = Math.round((oldW - width) / 2);
-    voicePopoverWindow.setPosition(oldX + dx, oldY);
+    // anchorBottom: keep the bottom edge fixed so the window grows upward
+    const dy = anchorBottom ? Math.round(oldH - height) : 0;
+    voicePopoverWindow.setPosition(oldX + dx, oldY + dy);
   });
 }
 
@@ -752,7 +806,47 @@ async function bootstrap(): Promise<void> {
   registerAuthIpcHandlers(supabaseConfig);
   registerShortcutIpcHandlers();
   registerMediaPermissionHandlers();
-  createMainWindow();
+
+  const mainWin = createMainWindow();
+  mainWin.on("close", (event) => {
+    if (!isQuitting) {
+      event.preventDefault();
+      mainWin.hide();
+    }
+  });
+
+  // System tray so the app is accessible after the main window is hidden
+  const trayIconPath = path.join(__dirname, "../../build/icons/icon.iconset/icon_16x16@2x.png");
+  const trayIcon = nativeImage.createFromPath(trayIconPath);
+  tray = new Tray(trayIcon);
+  tray.setToolTip(`Murmur  (${GLOBAL_SHORTCUT})`);
+  const trayMenu = Menu.buildFromTemplate([
+    {
+      label: "Open Dashboard",
+      click: () => {
+        mainWin.show();
+        mainWin.focus();
+      },
+    },
+    { type: "separator" },
+    {
+      label: "Quit Murmur",
+      click: () => {
+        isQuitting = true;
+        app.quit();
+      },
+    },
+  ]);
+  tray.setContextMenu(trayMenu);
+  tray.on("click", () => {
+    if (mainWin.isVisible()) {
+      mainWin.hide();
+    } else {
+      mainWin.show();
+      mainWin.focus();
+    }
+  });
+
   emitPendingOAuthCallback();
 
   const registeredVoiceShortcut = globalShortcut.register(GLOBAL_SHORTCUT, toggleVoicePopover);
@@ -771,6 +865,10 @@ async function bootstrap(): Promise<void> {
     }
   });
 }
+
+app.on("before-quit", () => {
+  isQuitting = true;
+});
 
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();

@@ -16,6 +16,9 @@ const envSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   NAVIGATION_ALLOWLIST: z.string().default("google.com,bing.com,duckduckgo.com"),
   ALLOW_FINAL_FORM_SUBMISSION: z.coerce.boolean().default(false),
+  // Optional: when set, Tavily is used for quick-answer web searches
+  // (current events, weather, prices, etc.) instead of falling back to browser_use.
+  TAVILY_API_KEY: z.string().optional(),
 });
 
 const result = envSchema.safeParse(process.env);

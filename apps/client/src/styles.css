@@ -1584,6 +1584,7 @@ body.runtime-macos .app-window-drag-handle {
 
 .voice-response-card {
   width: 340px;
+  -webkit-app-region: no-drag;
   background: #1c1c1e;
   border: none;
   border-radius: 22px;
@@ -1599,6 +1600,7 @@ body.runtime-macos .app-window-drag-handle {
 .voice-response-scroll {
   max-height: 180px;
   overflow-y: auto;
+  -webkit-app-region: no-drag;
   padding: 14px 18px;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
@@ -1628,13 +1630,267 @@ body.runtime-macos .app-window-drag-handle {
   white-space: pre-wrap;
   text-align: left;
   -webkit-app-region: no-drag;
+  -webkit-user-select: text;
   user-select: text;
+  cursor: text;
+}
+
+/* Ensure all rendered markdown children are also selectable */
+.voice-response-text * {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-app-region: no-drag;
+}
+
+/* Markdown-rendered response — overrides white-space so HTML block elements work */
+.voice-response-markdown {
+  white-space: normal;
+}
+
+.voice-response-markdown p {
+  margin: 0 0 6px;
+}
+.voice-response-markdown p:last-child {
+  margin-bottom: 0;
+}
+
+.voice-response-markdown ul,
+.voice-response-markdown ol {
+  margin: 4px 0 6px;
+  padding-left: 16px;
+}
+.voice-response-markdown ul:last-child,
+.voice-response-markdown ol:last-child {
+  margin-bottom: 0;
+}
+
+.voice-response-markdown li {
+  margin-bottom: 3px;
+  line-height: 1.6;
+}
+
+.voice-response-markdown ul li::marker {
+  color: rgba(245, 250, 240, 0.4);
+}
+.voice-response-markdown ol li::marker {
+  color: rgba(245, 250, 240, 0.4);
+}
+
+.voice-response-markdown h1,
+.voice-response-markdown h2,
+.voice-response-markdown h3 {
+  margin: 8px 0 4px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: rgba(245, 250, 240, 0.95);
+}
+.voice-response-markdown h1:first-child,
+.voice-response-markdown h2:first-child,
+.voice-response-markdown h3:first-child {
+  margin-top: 0;
+}
+.voice-response-markdown h1 { font-size: 12px; }
+.voice-response-markdown h2 { font-size: 11.5px; }
+.voice-response-markdown h3 { font-size: 11px; }
+
+.voice-response-markdown strong {
+  font-weight: 600;
+  color: rgba(245, 250, 240, 0.97);
+}
+
+.voice-response-markdown em {
+  font-style: italic;
+  color: rgba(245, 250, 240, 0.75);
+}
+
+.voice-response-markdown code {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
+.voice-response-markdown pre {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 6px 0;
+  overflow-x: auto;
+}
+.voice-response-markdown pre code {
+  background: none;
+  padding: 0;
+  font-size: 10px;
+}
+
+.voice-response-markdown hr {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  margin: 8px 0;
+}
+
+.voice-response-markdown blockquote {
+  border-left: 2px solid rgba(255, 255, 255, 0.2);
+  padding-left: 10px;
+  margin: 4px 0;
+  color: rgba(245, 250, 240, 0.6);
+}
+
+.md-link {
+  color: rgba(180, 210, 255, 0.85);
+  text-decoration: underline;
+  text-decoration-color: rgba(180, 210, 255, 0.35);
+  cursor: pointer;
+}
+
+.md-link:hover {
+  color: rgba(180, 210, 255, 1);
+  text-decoration-color: rgba(180, 210, 255, 0.6);
 }
 
 @keyframes response-fade-in {
   from { opacity: 0; transform: translateY(-6px) scale(0.97); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
+
+.voice-text-toggle-btn {
+  font-size: 16px;
+  /* default: › pointing right */
+  transform: translateY(-50%) rotate(0deg);
+  transition: background var(--duration-fast) var(--easing-standard),
+              transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.voice-text-toggle-btn:hover {
+  transform: translateY(-50%) rotate(0deg) scale(1.1);
+}
+
+.voice-text-toggle-btn--open {
+  /* open: › rotated -90deg = pointing up */
+  transform: translateY(-50%) rotate(-90deg);
+}
+
+.voice-text-toggle-btn--open:hover {
+  transform: translateY(-50%) rotate(-90deg) scale(1.1);
+}
+
+.voice-text-panel {
+  width: 340px;
+  background: #1c1c1e;
+  border-radius: 16px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.3);
+  padding: 10px 14px;
+  animation: context-panel-in 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+  -webkit-app-region: no-drag;
+}
+
+@keyframes context-panel-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.voice-clarification-card {
+  width: 340px;
+  background: #1c1c1e;
+  border-radius: 16px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.3),
+    0 0 0 1px rgba(255, 200, 80, 0.18);
+  padding: 12px 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: context-panel-in 0.25s cubic-bezier(0.22, 1, 0.36, 1) both;
+  -webkit-app-region: no-drag;
+}
+
+.voice-clarification-question {
+  margin: 0;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.55;
+  color: rgba(255, 210, 100, 0.9);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  user-select: text;
+}
+
+.voice-clarification-input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.voice-clarification-input {
+  flex: 1;
+}
+
+.voice-clarification-send-btn {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 210, 100, 0.85);
+  color: #1c1c1e;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--duration-fast) var(--easing-standard),
+              transform var(--duration-fast) var(--easing-standard);
+  -webkit-app-region: no-drag;
+}
+
+.voice-clarification-send-btn:hover {
+  background: rgba(255, 220, 130, 1);
+  transform: scale(1.1);
+}
+
+.voice-clarification-send-btn:active {
+  transform: scale(0.92);
+}
+
+.voice-clarification-send-btn--disabled {
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.25);
+  cursor: not-allowed;
+}
+
+.voice-text-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none !important;
+  box-shadow: none !important;
+  -webkit-appearance: none;
+  resize: none;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.6;
+  color: rgba(245, 250, 240, 0.88);
+  caret-color: rgba(245, 250, 240, 0.7);
+  scrollbar-width: none;
+  -webkit-app-region: no-drag;
+  user-select: text;
+}
+
+.voice-text-input::placeholder {
+  color: rgba(255, 255, 255, 0.25);
+}
+
+.voice-text-input::-webkit-scrollbar {
+  display: none;
+}
+
 
 @keyframes popover-enter {
   from { opacity: 0; transform: scale(0.82) translateY(14px); }

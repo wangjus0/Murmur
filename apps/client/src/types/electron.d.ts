@@ -14,7 +14,8 @@ type DesktopShortcutApi = {
   closePopover: () => Promise<void>;
   showPopover: () => Promise<void>;
   repositionPopover: (position: "center" | "top-right") => Promise<void>;
-  resizePopover: (width: number, height: number) => Promise<void>;
+  resizePopover: (width: number, height: number, anchorBottom?: boolean) => Promise<void>;
+  onPopoverDidShow: (listener: () => void) => () => void;
 };
 
 type DesktopAuthApi = {

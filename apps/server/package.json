@@ -7,12 +7,13 @@
     "dev": "tsx watch src/index.ts"
   },
   "dependencies": {
+    "@google/genai": "^1.1.0",
     "@murmur/shared": "*",
+    "@tavily/core": "^0.7.2",
+    "dotenv": "^16.4.0",
     "express": "^5.1.0",
     "ws": "^8.18.0",
-    "zod": "^3.24.0",
-    "dotenv": "^16.4.0",
-    "@google/genai": "^1.1.0"
+    "zod": "^3.24.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",

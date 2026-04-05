@@ -13,6 +13,10 @@ export class SttAdapter {
   private callbacks: SttCallbacks;
   private closingByClient = false;
   private pendingChunks: string[] = [];
+  /** Raw PCM16 bytes, buffered so we can fall back to batch STT if VAD never commits. */
+  private audioBuffer: Buffer[] = [];
+  /** Set to true the first time ElevenLabs emits a committed_transcript during streaming. */
+  private hasReceivedCommit = false;
 
   constructor(apiKey: string, callbacks: SttCallbacks) {
     this.apiKey = apiKey;
@@ -65,6 +69,7 @@ export class SttAdapter {
               eventType === "committed_transcript_with_timestamps") &&
             msg.text?.trim()
           ) {
+            this.hasReceivedCommit = true;
             this.callbacks.onFinal(msg.text);
             return;
           }
@@ -109,6 +114,9 @@ export class SttAdapter {
   sendAudio(base64Chunk: string): void {
     if (!base64Chunk.length) return;
 
+    // Buffer raw PCM16 bytes for batch fallback
+    this.audioBuffer.push(Buffer.from(base64Chunk, "base64"));
+
     const message = JSON.stringify({
       message_type: "input_audio_chunk",
       audio_base_64: base64Chunk,
@@ -124,65 +132,44 @@ export class SttAdapter {
   }
 
   /**
-   * Signal end-of-audio and wait for the final transcript before closing.
-   * Does NOT close immediately — waits for ElevenLabs to flush its VAD buffer
-   * and emit the final transcript, then closes.
+   * Signal end-of-audio and ensure a final transcript is delivered via callbacks.
+   *
+   * Fast path  — if ElevenLabs' VAD already committed during streaming (natural
+   *              silence was detected), the transcript is already in the session's
+   *              accumulatedTranscript. We just close the WebSocket and return.
+   *
+   * Batch path — if the user pressed Space mid-speech (no VAD commit), streaming
+   *              never emitted a committed_transcript. We fall back to the
+   *              ElevenLabs REST batch API using the buffered PCM16 audio.
+   *              This always returns a full transcript.
    */
-  closeGracefully(): Promise<void> {
-    return new Promise((resolve) => {
-      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-        this.ws = null;
-        resolve();
-        return;
-      }
-
+  async closeGracefully(): Promise<void> {
+    // Close the streaming WebSocket immediately
+    if (this.ws?.readyState === WebSocket.OPEN) {
       this.closingByClient = true;
+      this.ws.close(1000, "client_closed");
+    }
+    this.ws = null;
 
-      const closeAndResolve = () => {
-        clearTimeout(finalWaitTimeout);
-        clearTimeout(hardTimeout);
-        if (this.ws?.readyState === WebSocket.OPEN) {
-          this.ws.close(1000, "client_closed");
-        }
-        // Wait for the close handshake to complete
-        if (this.ws) {
-          this.ws.once("close", () => resolve());
-          // Safety net in case the close event never fires
-          setTimeout(resolve, 500);
-        } else {
-          resolve();
-        }
-      };
+    // Fast path: VAD already committed during recording
+    if (this.hasReceivedCommit) {
+      console.log("[STT] closeGracefully: VAD committed during streaming, done");
+      return;
+    }
 
-      // Intercept onFinal so we can detect when the transcript arrives
-      const originalOnFinal = this.callbacks.onFinal;
-      this.callbacks.onFinal = (text: string) => {
-        this.callbacks.onFinal = originalOnFinal;
-        originalOnFinal(text);
-        // Give a tiny grace window for any follow-up messages, then close
-        setTimeout(closeAndResolve, 80);
-      };
-
-      // If no final transcript arrives within 2s, force-close anyway
-      const finalWaitTimeout = setTimeout(() => {
-        console.warn("[STT] No final transcript received within timeout, force-closing");
-        this.callbacks.onFinal = originalOnFinal;
-        closeAndResolve();
-      }, 2000);
-
-      // Absolute hard cap
-      const hardTimeout = setTimeout(() => {
-        this.callbacks.onFinal = originalOnFinal;
-        resolve();
-      }, 3000);
-
-      this.ws.once("close", () => {
-        clearTimeout(finalWaitTimeout);
-        clearTimeout(hardTimeout);
-        this.callbacks.onFinal = originalOnFinal;
-        resolve();
-      });
-    });
+    // Batch fallback: no VAD commit → transcribe buffered audio via REST API
+    console.log(`[STT] closeGracefully: no VAD commit, falling back to batch STT (${this.audioBuffer.length} chunks)`);
+    try {
+      const transcript = await this.transcribeBatch();
+      if (transcript) {
+        console.log(`[STT] Batch transcript (${transcript.length} chars): "${transcript.slice(0, 80)}"`);
+        this.callbacks.onFinal(transcript);
+      } else {
+        console.warn("[STT] Batch transcription returned empty result");
+      }
+    } catch (err) {
+      console.error("[STT] Batch transcription failed:", err);
+    }
   }
 
   close(): void {
@@ -193,5 +180,64 @@ export class SttAdapter {
     }
 
     this.ws = null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private helpers
+  // ---------------------------------------------------------------------------
+
+  private async transcribeBatch(): Promise<string> {
+    if (!this.audioBuffer.length) return "";
+
+    const pcmData = Buffer.concat(this.audioBuffer);
+    if (!pcmData.length) return "";
+
+    const wavData = this.buildWav(pcmData);
+
+    const formData = new FormData();
+    formData.append("file", new Blob([wavData], { type: "audio/wav" }), "audio.wav");
+    formData.append("model_id", "scribe_v1");
+    formData.append("language_code", "en");
+
+    const response = await fetch("https://api.elevenlabs.io/v1/speech-to-text", {
+      method: "POST",
+      headers: { "xi-api-key": this.apiKey },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => "(unreadable)");
+      throw new Error(`ElevenLabs batch STT ${response.status}: ${errText}`);
+    }
+
+    const result = (await response.json()) as { text?: string };
+    return result.text?.trim() ?? "";
+  }
+
+  /** Wraps raw PCM16 mono audio in a minimal WAV container. */
+  private buildWav(pcmData: Buffer): Buffer {
+    const numChannels = 1;
+    const sampleRate = AUDIO_SAMPLE_RATE;
+    const bitsPerSample = 16;
+    const byteRate = (sampleRate * numChannels * bitsPerSample) / 8;
+    const blockAlign = (numChannels * bitsPerSample) / 8;
+    const dataSize = pcmData.length;
+
+    const header = Buffer.alloc(44);
+    header.write("RIFF", 0, "ascii");
+    header.writeUInt32LE(36 + dataSize, 4);
+    header.write("WAVE", 8, "ascii");
+    header.write("fmt ", 12, "ascii");
+    header.writeUInt32LE(16, 16);
+    header.writeUInt16LE(1, 20);       // PCM = 1
+    header.writeUInt16LE(numChannels, 22);
+    header.writeUInt32LE(sampleRate, 24);
+    header.writeUInt32LE(byteRate, 28);
+    header.writeUInt16LE(blockAlign, 32);
+    header.writeUInt16LE(bitsPerSample, 34);
+    header.write("data", 36, "ascii");
+    header.writeUInt32LE(dataSize, 40);
+
+    return Buffer.concat([header, pcmData]);
   }
 }

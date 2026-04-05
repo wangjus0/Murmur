@@ -43,6 +43,7 @@
     "files": [
       "dist-electron/**/*",
       "apps/client/dist/**/*",
+      "build/icons/**/*",
       "package.json"
     ],
     "mac": {

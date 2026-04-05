@@ -1,5 +1,10 @@
 const BASE_URL = "https://api.browser-use.com/api/v3";
-const POLL_INTERVAL_MS = 2000;
+// Polling schedule: start fast (500 ms) and back off gradually to a cap (3 s).
+// The first check fires after POLL_INITIAL_MS so fast integration tasks resolve
+// quickly, while slow browser tasks don't hammer the API.
+const POLL_INITIAL_MS = 500;
+const POLL_MAX_MS = 3000;
+const POLL_BACKOFF_FACTOR = 1.4; // each interval = prev * 1.4, capped at POLL_MAX_MS
 const PROFILE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_SKILL_IDS_PER_TASK = 3;
 const WILDCARD_SKILL_IDS = ["*"] as const;
@@ -189,14 +194,22 @@ export class BrowserAdapter implements BrowserTaskExecutor {
         : "Browser task started, working..."
     );
 
-    // Poll until terminal status
+    // Poll until terminal status.
+    // Sleep AFTER each check (not before) so a fast-completing task is
+    // discovered on the first iteration. Interval starts at POLL_INITIAL_MS
+    // and grows by POLL_BACKOFF_FACTOR each round up to POLL_MAX_MS.
+    //
+    // Status lifecycle per Browser Use API v3 docs:
+    //   created → idle (sandbox ready, no task yet) → running → stopped
+    //   or: running → timed_out / error
+    // "idle" means the sandbox is WAITING for a task — NOT that the task finished.
+    // Only "stopped" means the task completed (successfully or not).
     let lastStepCount = 0;
     let lastStepSummary = "";
+    let pollInterval = POLL_INITIAL_MS;
 
     try {
       while (!this.cancelled) {
-        await sleep(POLL_INTERVAL_MS);
-
         const pollRes = await fetch(`${BASE_URL}/sessions/${this.currentSessionId}`, {
           headers: { "X-Browser-Use-API-Key": this.apiKey },
         });
@@ -207,11 +220,14 @@ export class BrowserAdapter implements BrowserTaskExecutor {
 
         const sessionData = (await pollRes.json()) as {
           status: string;
-          output?: string | null;
+          // output is anyOf: [{}, null] per the API schema — can be any JSON value
+          output?: unknown;
           isTaskSuccessful?: boolean | null;
           stepCount?: number;
           lastStepSummary?: string | null;
         };
+
+        console.log(`[Browser] Poll status=${sessionData.status} steps=${sessionData.stepCount ?? 0} isTaskSuccessful=${sessionData.isTaskSuccessful ?? "null"} outputType=${typeof sessionData.output} outputTruncated=${JSON.stringify(sessionData.output)?.slice(0, 200)}`);
 
         // Surface step progress when available
         const currentStepCount = sessionData.stepCount ?? 0;
@@ -224,27 +240,95 @@ export class BrowserAdapter implements BrowserTaskExecutor {
           lastStepSummary = currentSummary;
         }
 
-        // v3 terminal statuses: stopped (success), idle (keep-alive done),
-        // error, timed_out
-        if (
-          sessionData.status === "stopped" ||
-          sessionData.status === "idle"
-        ) {
-          return sessionData.output ?? "Task completed but no output was returned.";
+        // "stopped" is the only terminal success status per the v3 API docs.
+        // "idle" means the sandbox is healthy but waiting for a task — NOT done.
+        if (sessionData.status === "stopped") {
+          const output = extractOutput(sessionData.output);
+          if (output) {
+            return output;
+          }
+          // output is null/empty on stopped — fetch from the messages endpoint
+          // which holds the agent's completion message.
+          const messageOutput = await this.fetchCompletionMessage(this.currentSessionId);
+          return messageOutput ?? "Task completed but no output was returned.";
         }
 
         if (
           sessionData.status === "error" ||
           sessionData.status === "timed_out"
         ) {
-          return sessionData.output ?? `Task ${sessionData.status}.`;
+          const output = extractOutput(sessionData.output);
+          // Attempt to get details from messages even on error/timeout
+          if (!output) {
+            const messageOutput = await this.fetchCompletionMessage(this.currentSessionId);
+            if (messageOutput) return messageOutput;
+          }
+          return output ?? `Task ${sessionData.status}.`;
         }
+
+        // Task still running (or sandbox in created/idle/running state) —
+        // wait before polling again, then back off.
+        await sleep(pollInterval);
+        pollInterval = Math.min(Math.round(pollInterval * POLL_BACKOFF_FACTOR), POLL_MAX_MS);
       }
 
       return "Task was interrupted.";
     } finally {
       await this.stopSession(this.currentSessionId);
       this.currentSessionId = null;
+    }
+  }
+
+  /**
+   * Fetch the last completion/assistant message for a session.
+   * Used as a fallback when the session's `output` field is null/empty
+   * but the agent did produce a result in the message stream.
+   */
+  private async fetchCompletionMessage(sessionId: string | null): Promise<string | null> {
+    if (!sessionId) return null;
+    try {
+      const res = await fetch(
+        `${BASE_URL}/sessions/${sessionId}/messages?limit=20`,
+        { headers: { "X-Browser-Use-API-Key": this.apiKey } }
+      );
+      if (!res.ok) return null;
+
+      const data = (await res.json()) as {
+        messages?: Array<{ role: string; type: string; data: string; hidden?: boolean }>;
+      };
+
+      if (!Array.isArray(data.messages) || data.messages.length === 0) return null;
+
+      // Walk backwards — the last non-hidden AI message with type "completion"
+      // or "assistant_message" is the agent's final answer.
+      const reversed = [...data.messages].reverse();
+      for (const msg of reversed) {
+        if (msg.hidden) continue;
+        if (msg.role !== "ai") continue;
+        if (msg.type === "completion" || msg.type === "assistant_message") {
+          const text = typeof msg.data === "string" ? msg.data.trim() : "";
+          if (text) {
+            console.log(`[Browser] Got output from messages (type=${msg.type}): ${text.slice(0, 200)}`);
+            return text;
+          }
+        }
+      }
+
+      // Secondary fallback: any non-hidden AI message with non-empty data
+      for (const msg of reversed) {
+        if (msg.hidden) continue;
+        if (msg.role !== "ai") continue;
+        const text = typeof msg.data === "string" ? msg.data.trim() : "";
+        if (text) {
+          console.log(`[Browser] Got output from fallback message (type=${msg.type}): ${text.slice(0, 200)}`);
+          return text;
+        }
+      }
+
+      return null;
+    } catch (err) {
+      console.error("[Browser] fetchCompletionMessage error:", err);
+      return null;
     }
   }
 
@@ -264,6 +348,27 @@ export class BrowserAdapter implements BrowserTaskExecutor {
 }
 
 export { BrowserAdapter as BrowserUseAdapter };
+
+/**
+ * Safely extract a non-empty string from the Browser Use API `output` field.
+ * The API types `output` as `anyOf: [{}, null]` — it can be a string, object,
+ * array, number, or null. We normalise to a string or return null if empty.
+ */
+function extractOutput(raw: unknown): string | null {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    return trimmed || null;
+  }
+  // Non-string value (object, array, number, boolean) — JSON-serialise it so
+  // Gemini's refineOutput step can still process the structured data.
+  try {
+    const serialised = JSON.stringify(raw, null, 2);
+    return serialised || null;
+  } catch {
+    return null;
+  }
+}
 
 function normalizeProfileId(raw: string | null | undefined): string | null {
   if (!raw) {

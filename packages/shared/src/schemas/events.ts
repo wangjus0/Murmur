@@ -21,8 +21,9 @@ export const ClientEventSchema = z.discriminatedUnion("type", [
     browserUseApiKey: z.string().min(1).optional(),
   }),
   z.object({ type: z.literal("audio_chunk"), data: z.string() }),
-  z.object({ type: z.literal("audio_end") }),
+  z.object({ type: z.literal("audio_end"), context: z.string().optional() }),
   z.object({ type: z.literal("interrupt") }),
+  z.object({ type: z.literal("text_input"), text: z.string() }),
 ]);
 
 // ── Server → Client ────────────────────────────────────────
@@ -37,6 +38,7 @@ export const ServerEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("narration_audio"), audio: z.string() }),
   z.object({ type: z.literal("done") }),
   z.object({ type: z.literal("error"), message: z.string() }),
+  z.object({ type: z.literal("clarification_request"), question: z.string() }),
 ]);
 
 // ── Parse helpers ──────────────────────────────────────────

@@ -9,96 +9,84 @@ import { z } from "zod";
 
 // Curated list of high-value integrations grouped by category.
 // We don't send all 978 to Gemini — just the ones most likely to be useful.
+// IMPORTANT: The integrations listed under "BrowserUse Connected Integrations" are
+// available as OAuth-connected accounts via BrowserUse. When a task targets one of
+// these services, ALWAYS prefer the integration over raw web browsing.
 const INTEGRATION_CATALOG = `
-## Available Integrations (via Composio)
+## BrowserUse Connected Integrations
+These integrations are available as authenticated OAuth connections via BrowserUse.
+Use them DIRECTLY instead of navigating websites manually.
+CRITICAL: Prefer these integrations even when the user does NOT name the brand.
 
-### Email & Communication
-- Gmail: read/send/search emails, manage labels
-- Outlook: read/send emails, calendar integration
-- Slack: send/read messages, manage channels
-- Discord: send messages, manage servers
-- Microsoft Teams: messaging, meeting scheduling
-- WhatsApp: send/receive messages
-- Telegram: send/receive messages
+### Email
+- Gmail (tool: gmail) — read/send/search emails, manage labels, list inbox
+  Triggers: "email", "emails", "inbox", "unread", "check my email", "read my emails",
+            "my recent emails", "new emails", "compose email", "send email", "reply to email"
+- Outlook (tool: outlook) — read/send emails, manage folders
+  Triggers: "outlook", "hotmail", "microsoft email"
 
-### Calendar & Scheduling
-- Google Calendar: create/read/update events, check availability
-- Calendly: manage scheduling links, check bookings
-- Cal: open-source scheduling
+### Communication
+- Slack (tool: slack) — send/read messages, manage channels
+  Triggers: "slack", "slack message", "slack channel", "message on slack"
+- Discord (tool: discord) — send messages, read channels, manage servers
+  Triggers: "discord", "discord message", "discord server"
 
-### Productivity & Docs
-- Google Docs: create/edit documents
-- Google Sheets: read/write spreadsheet data
-- Google Slides: create/edit presentations
-- Google Drive: file management, sharing
-- Notion: pages, databases, notes
-- Todoist: task management
-- Trello: board/card management
-- Asana: project/task management
-- ClickUp: project management
-- Linear: issue tracking
-- Jira: issue/project tracking
+### Storage & Data
+- Google Drive (tool: google_drive) — file management, sharing, upload/download
+  Triggers: "google drive", "my drive", "my files on drive"
+- Google Sheets (tool: google_sheets) — read/write spreadsheet data, formulas
+  Triggers: "google sheets", "spreadsheet", "my spreadsheet"
+- Dropbox (tool: dropbox) — file storage, sharing
+  Triggers: "dropbox"
+- Supabase (tool: supabase) — database queries, table management
+  Triggers: "supabase", "my database"
 
-### Code & Dev
-- GitHub: repos, issues, PRs, code search
-- GitLab: repos, CI/CD
-- Vercel: deployments, domains
-- DigitalOcean: infrastructure
+### Productivity
+- Google Calendar (tool: google_calendar) — create/read/update events, check availability
+  Triggers: "google calendar", "my calendar", "calendar", "schedule", "appointments",
+            "upcoming events", "what's on my calendar", "add to calendar", "schedule a meeting"
+- Google Docs (tool: google_docs) — create/edit documents
+  Triggers: "google docs", "my document", "create a doc"
+- Notion (tool: notion) — pages, databases, notes
+  Triggers: "notion", "notion page", "my notes"
 
-### Data & Search
-- Google Maps: places, directions, geocoding
-- Exa: AI-powered web search
-- SerpApi: search engine results
-- Wikipedia (via web): knowledge lookup
-- Semantic Scholar: academic paper search
-- Hacker News: tech news
+### Developer Tools
+- GitHub (tool: github) — repos, issues, PRs, code search
+  Triggers: "github", "my repos", "pull requests", "open PRs", "github issues"
+- Exa (tool: exa) — AI-powered web search (use for broad research queries)
+- Jira (tool: jira) — issue/project tracking
+  Triggers: "jira", "jira tickets", "my tickets"
+- Linear (tool: linear) — issue tracking
+  Triggers: "linear", "linear issues"
 
-### Finance & Payments
-- Stripe: payment data, invoices
-- QuickBooks: accounting
-- Splitwise: expense splitting
-
-### Social Media
-- Twitter/X: posts, search, trends
-- LinkedIn: profile, posts, job search
-- Instagram: posts, stories
-- Reddit: posts, comments, subreddit search
-- YouTube: video search, channel data
-- TikTok: content discovery
+### Design
+- Figma (tool: figma) — view/manage design files
+  Triggers: "figma", "my figma files"
 
 ### CRM & Sales
-- HubSpot: contacts, deals, companies
-- Salesforce: CRM data
-- Apollo: prospect data
+- HubSpot (tool: hubspot) — contacts, deals, companies
+  Triggers: "hubspot", "my contacts", "my deals"
+- Salesforce (tool: salesforce) — CRM data
+  Triggers: "salesforce"
 
-### Food & Local
-- Google Maps: restaurant/business search, reviews, directions
-- Yelp (via web): reviews, ratings
-- Instacart: grocery ordering
+### Payments
+- Stripe (tool: stripe) — payment data, invoices, customers
+  Triggers: "stripe", "my payments", "my invoices", "stripe customers"
 
-### Travel & Transport
-- Google Maps: directions, transit, distances
-- TripAdvisor: reviews, attractions
-- Eventbrite: event discovery
-
-### Education
-- Google Classroom: assignments, courses
-- Canvas: LMS integration
-
-### Weather & Environment
-- OpenWeatherMap: current/forecast weather
-- Ambient Weather: station data
-
-### Music & Entertainment
-- Spotify: playlists, track search, playback
-- Ticketmaster: event/concert tickets
-- RAWG: video game database
-
-### Browser Automation (always available)
+## Browser Automation (LAST RESORT — only use when no integration covers the task)
 - Direct web browsing: navigate any website, click, type, scroll, extract content
 - Form filling: fill out web forms (draft mode by default)
 - Multi-site comparison: compare data across multiple websites
 - Web scraping: extract structured data from any page
+Examples of when to use browser_use: search Google, visit a news site, check Amazon prices,
+look up a Wikipedia article, navigate a website not in the integration list.
+NEVER use browser_use for email, calendar, docs, sheets, drive, or messaging tasks.
+
+## Other Services (browser automation only, no direct integration)
+- Google Maps, Calendly, Google Slides, Todoist, Trello, Asana, ClickUp
+- GitLab, Vercel, DigitalOcean, SerpApi, Wikipedia, Hacker News
+- QuickBooks, Splitwise, Twitter/X, LinkedIn, Instagram, Reddit, YouTube
+- Yelp, Instacart, TripAdvisor, Eventbrite, OpenWeatherMap, Spotify, Ticketmaster
 `;
 
 const toolPlanSchema = z.object({
@@ -136,13 +124,28 @@ ${INTEGRATION_CATALOG}
    - Tasks where the API provides everything needed
 
 ## Rules
-- Always prefer integrations over browser scraping when both can accomplish the task
-- For location/business queries: use Google Maps integration for structured data
-- For email/messaging: always use direct integration (never browser)
-- For scheduling: always use calendar integration (never browser)
-- For code/dev tasks: use GitHub/GitLab integration
-- The enhanced_prompt should be specific and actionable — include which sites to visit, what data to collect
-- Keep reasoning to 1-2 sentences
+- ALWAYS prefer BrowserUse Connected Integrations over browser scraping — even when the user does NOT name the brand.
+- Match by topic, not just brand name. Examples:
+  - "check my email" / "unread emails" / "recent emails" → gmail (integration_direct)
+  - "what's on my calendar" / "my schedule" / "upcoming events" → google_calendar (integration_direct)
+  - "my spreadsheet" / "update the sheet" → google_sheets (integration_direct)
+  - "open a doc" / "create a document" → google_docs (integration_direct)
+  - "my files" → google_drive (integration_direct)
+  - "my repos" / "open PRs" → github (integration_direct)
+  - "my slack messages" / "message the team" → slack (integration_direct)
+- For email tasks: ALWAYS integration_direct with gmail (or outlook if explicitly named). NEVER navigate gmail.com.
+- For calendar tasks: ALWAYS integration_direct with google_calendar. NEVER navigate calendar.google.com.
+- For messaging (Slack, Discord): ALWAYS integration_direct.
+- For files/docs (Google Drive, Docs, Sheets, Notion, Dropbox): ALWAYS integration_direct.
+- For code/dev (GitHub, Jira, Linear): ALWAYS integration_direct.
+- For CRM (HubSpot, Salesforce): ALWAYS integration_direct.
+- For payments (Stripe): ALWAYS integration_direct.
+- Use browser_only ONLY when the task is truly general web browsing with no matching integration.
+- Use the exact tool name from the catalog in the "integrations" array (e.g. "Gmail", "Google Drive", "Slack").
+- The enhanced_prompt must be fully self-contained and specific.
+  - Resolve pronouns and vague references using conversation history.
+  - Never leave "it", "that", "those", "the same" in enhanced_prompt — replace with the actual subject.
+- Keep reasoning to 1-2 sentences.
 
 Respond with JSON only:
 {

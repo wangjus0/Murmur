@@ -1,6 +1,7 @@
 import type { GoogleGenAI } from "@google/genai";
 import type { IntentResult, ServerEvent } from "@murmur/shared";
 import { env } from "../config/env.js";
+import { tavilySearch } from "../tools/tavily/tavily-search.js";
 import { BrowserAdapter } from "../tools/browser/adapter.js";
 import { narrate } from "../voice/narrator.js";
 import {
@@ -59,8 +60,9 @@ interface TranscriptFinalLegacyDependencies {
   ) => Promise<IntentResult>;
   narrate?: (
     session: Orchestratable,
-    text: string,
-    apiKey: string
+    displayText: string,
+    apiKey: string,
+    spokenText?: string
   ) => Promise<void>;
   createBrowserAdapter?: (apiKey: string) => BrowserExecutor;
   selectTool?: (
@@ -71,8 +73,9 @@ interface TranscriptFinalLegacyDependencies {
   refineOutput?: (
     ai: GoogleGenAI,
     userRequest: string,
-    rawOutput: string
-  ) => Promise<string>;
+    rawOutput: string,
+    historyContext?: string
+  ) => Promise<RefinedOutput>;
   browserApiKey?: string;
   browserApiKeySource?: "user" | "server";
 }
@@ -82,7 +85,7 @@ type TranscriptFinalOverrideDeps = Partial<TranscriptFinalDeps> &
 
 type TranscriptFinalDeps = Readonly<{
   classify: (ai: GoogleGenAI, text: string, historyContext?: string) => Promise<IntentResult>;
-  narrate: (session: Orchestratable, text: string, apiKey: string) => Promise<void>;
+  narrate: (session: Orchestratable, displayText: string, apiKey: string, spokenText?: string) => Promise<void>;
   createBrowserAdapter: (apiKey: string) => BrowserExecutor;
   selectTool: (
     ai: GoogleGenAI,
@@ -94,7 +97,7 @@ type TranscriptFinalDeps = Readonly<{
     userRequest: string,
     rawOutput: string,
     historyContext?: string
-  ) => Promise<string>;
+  ) => Promise<RefinedOutput>;
   refineBrowserQuery: (
     ai: GoogleGenAI,
     userRequest: string,
@@ -167,43 +170,74 @@ const INTEGRATION_TOOL_IDS = new Set<ToolId>(
   AVAILABLE_TOOL_IDS.filter((toolId) => !NATIVE_ORCHESTRATOR_TOOLS.has(toolId))
 );
 
-const TOOL_SELECTION_SYSTEM_PROMPT = `You are a tool router.
+const TOOL_SELECTION_SYSTEM_PROMPT = `You are a tool router for a voice assistant with connected integrations.
 Choose exactly one best tool for the user request from this list:
 ${AVAILABLE_TOOL_IDS.join(", ")}
 
-Rules:
-- Prefer specialized integrations (gmail, notion, github, stripe, etc.) when the request clearly targets them.
-- If the user explicitly names a provider (for example Gmail, Outlook, Slack, Notion, GitHub, Stripe), choose that provider's integration tool.
-- Use web_extract when the user asks to extract/summarize a specific page.
-- Use multi_site_compare when the user asks to compare across multiple sites.
-- Use browser_use for generic browsing/search/form actions.
-- If toolId is an integration tool (gmail/notion/github/stripe/etc.), include integrationInstruction in this exact format:
-  "Can you use the <tool> integration and <short objective summary>"
-  - The objective must be short and action-focused, not a verbatim copy of the user prompt.
+## Implicit service mappings — apply these FIRST before considering browser_use
+Even when the user does NOT name a brand, map these topics to the right integration:
+- "email", "emails", "inbox", "unread", "check my email", "read my email" → gmail
+- "calendar", "schedule", "events", "appointments", "upcoming meetings" → google_calendar
+- "spreadsheet", "sheet" → google_sheets
+- "document", "doc" (not a URL) → google_docs
+- "my files", "my drive" → google_drive
+- "notes", "notion page" → notion
+- "repos", "pull requests", "issues" (code) → github
+- "tickets", "jira" → jira
+- "stripe payments", "invoices", "charges" → stripe
+- "slack", "slack message" → slack
+- "discord", "discord message" → discord
+
+## Rules
+- ALWAYS prefer an integration over browser_use when the task targets a connected service — even if the user does not name the brand.
+- Use web_extract ONLY when the user provides a specific URL to read/summarize.
+- Use multi_site_compare ONLY when comparing across multiple distinct websites.
+- Use browser_use ONLY when no integration covers the task (e.g. general web search, navigating a random website).
+- NEVER use browser_use for email, calendar, documents, spreadsheets, or messaging tasks — use the matching integration.
+- If toolId is an integration tool, include integrationInstruction:
+  "Can you use the <tool> integration and <short action-focused objective>"
 - If toolId is not an integration tool, omit integrationInstruction.
 - Return JSON only:
-{"toolId":"...", "confidence":0.0, "reason":"short reason", "integrationInstruction":"Can you use the ... integration and ..."} `;
+{"toolId":"...", "confidence":0.0, "reason":"short reason", "integrationInstruction":"Can you use the ... integration and ..."}`;
 
 const PROVIDER_DETECTION_TERMS: Partial<Record<ToolId, readonly string[]>> = {
-  gmail: ["gmail", "google mail", "inbox"],
-  outlook: ["outlook", "microsoft outlook"],
+  gmail: [
+    "gmail", "google mail",
+    // Generic email terms — default to gmail when no brand is specified
+    "my email", "my emails", "check email", "check my email", "read email", "read emails",
+    "unread email", "unread emails", "unread messages", "inbox", "new emails",
+    "email inbox", "recent emails", "latest emails", "compose email", "send email",
+    "reply to email", "email thread",
+  ],
+  outlook: ["outlook", "microsoft outlook", "hotmail", "live.com"],
   discord: ["discord"],
-  slack: ["slack"],
+  slack: ["slack", "slack message", "slack channel"],
   dropbox: ["dropbox"],
-  google_drive: ["google drive", "drive"],
-  google_sheets: ["google sheets", "sheets"],
+  google_drive: ["google drive", "my drive", "gdrive"],
+  google_sheets: ["google sheets", "google spreadsheet", "spreadsheet"],
   supabase: ["supabase"],
-  google_calendar: ["google calendar", "calendar"],
-  google_docs: ["google docs", "docs"],
-  notion: ["notion"],
+  google_calendar: [
+    "google calendar",
+    // Generic calendar / scheduling terms
+    "my calendar", "check calendar", "check my calendar", "calendar events",
+    "my schedule", "check my schedule", "upcoming events", "what's on my calendar",
+    "add to calendar", "create event", "schedule meeting", "schedule a meeting",
+    "appointments", "my appointments",
+  ],
+  google_docs: ["google docs", "google document", "my docs"],
+  notion: ["notion", "notion page", "notion database"],
   exa: ["exa"],
-  github: ["github"],
-  jira: ["jira", "atlassian"],
-  linear: ["linear"],
-  figma: ["figma"],
-  hubspot: ["hubspot"],
-  salesforce: ["salesforce"],
-  stripe: ["stripe"],
+  github: [
+    "github",
+    "my repos", "my repository", "pull request", "pull requests", "open pr",
+    "github issues", "github repo",
+  ],
+  jira: ["jira", "atlassian", "jira ticket", "jira issue"],
+  linear: ["linear", "linear issue", "linear ticket"],
+  figma: ["figma", "figma file", "figma design"],
+  hubspot: ["hubspot", "hubspot contact", "hubspot deal"],
+  salesforce: ["salesforce", "salesforce crm"],
+  stripe: ["stripe", "stripe payment", "stripe invoice", "stripe customer"],
 };
 
 // ── Conversation history ──────────────────────────────────────────────────────
@@ -278,6 +312,77 @@ async function maybeCompactHistory(
   }
 }
 
+// ── Context-aware transcript resolution ──────────────────────────────────────
+
+// Patterns that indicate the user's request may depend on prior context.
+const UNDERSPECIFIED_PATTERNS = [
+  /\b(it|that|this|those|these|they|them|there)\b/i,
+  /\b(the same|more of|another|again|like that|like those)\b/i,
+  /^(yes|no|okay|ok|sure|good|bad|nice|great|cool|perfect)\b/i,
+  /^(tell me more|what about|and what|but what|so what|how about)\b/i,
+  /^(show me|find me|get me|give me|look up|search for)\s+\w{1,3}\b/i,
+  /\b(the (first|second|third|last|previous|next) one)\b/i,
+];
+
+function isTranscriptUnderspecified(transcript: string): boolean {
+  const words = transcript.trim().split(/\s+/);
+  if (words.length <= 4) return true; // very short — likely context-dependent
+  return UNDERSPECIFIED_PATTERNS.some((p) => p.test(transcript.trim()));
+}
+
+const CONTEXT_RESOLUTION_SYSTEM_PROMPT = `You resolve ambiguous user requests using conversation history.
+Rewrite the user's latest message as a fully self-contained query that makes sense on its own.
+
+Rules:
+- Replace pronouns (it, that, this, those) with the actual subject from history
+- Resolve relative references ("more", "another one", "the first one") to be explicit
+- If the request is about a topic discussed earlier, include that topic explicitly
+- Preserve the user's intent — don't expand beyond what they asked
+- If the request is already fully self-contained and specific, return it unchanged
+
+Respond with JSON only:
+{
+  "resolved": "the fully self-contained version of the user's request"
+}`;
+
+async function resolveTranscriptWithContext(
+  ai: GoogleGenAI,
+  transcript: string,
+  historyContext: string
+): Promise<string> {
+  const generateContent = ai?.models?.generateContent;
+  if (typeof generateContent !== "function") return transcript;
+
+  try {
+    const response = await generateContent({
+      model: "gemini-2.5-flash",
+      contents:
+        `${CONTEXT_RESOLUTION_SYSTEM_PROMPT}\n\n` +
+        `[Conversation History]\n${historyContext}\n\n` +
+        `[User's latest message]\n"${transcript}"`,
+      config: { responseMimeType: "application/json" },
+    });
+
+    const text = response.text;
+    if (!text) return transcript;
+
+    let parsed: { resolved?: unknown };
+    try {
+      parsed = JSON.parse(text) as { resolved?: unknown };
+    } catch {
+      return transcript;
+    }
+
+    if (typeof parsed.resolved === "string" && parsed.resolved.trim()) {
+      return parsed.resolved.trim();
+    }
+    return transcript;
+  } catch (err) {
+    console.error("[Orchestrator] Context resolution failed:", err);
+    return transcript;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 const MAX_CORE_NARRATION_LINES = 12;
@@ -290,20 +395,87 @@ const PROCESS_LINE_PATTERNS = [
   /^(i|we)\s+(navigated|visited|went|opened|clicked|searched|reviewed|checked)\b/i,
   /^(navigated|visited|opened|clicked|searched)\b/i,
 ];
-const OUTPUT_REFINEMENT_SYSTEM_PROMPT = `You clean raw browser automation output for voice playback.
+const OUTPUT_REFINEMENT_SYSTEM_PROMPT = `You clean raw browser automation output into a readable response.
 Return ONLY the core information the user asked for.
-Requirements:
-- Keep the answer concise and factual.
+Requirements for "answer":
 - Exclude process narration (steps, navigation logs, tool status, "I clicked", etc.).
-- Prefer direct answer format over explanation.
-- If the user asked for N items (e.g. "3 most recent emails", "top 5 results"), preserve ALL N items in the answer. Do NOT reduce the count.
-- If the raw output includes a list, keep every item that the user explicitly requested.
+- Use markdown formatting when it improves readability:
+  - Bullet points (-) for lists of items, results, or steps
+  - **bold** for names, titles, or key values
+  - Numbered lists when order matters
+  - Plain prose for short single-fact answers
+- If the user asked for N items (e.g. "3 most recent emails", "top 5 results"), preserve ALL N items. Do NOT reduce the count.
 - If there is an error, state it plainly in one short sentence.
+
+Requirements for "spoken_summary":
+- A 1–2 sentence plain-English summary of the answer, suitable for reading aloud by a text-to-speech voice.
+- No markdown, no bullet points, no bold/italic markers, no URLs.
+- Cover only the most important finding or key takeaway. The user can read the full details on screen.
+- Do not start with "Here is", "Sure", "Certainly", or filler phrases.
+- If the answer is a list, name the top item or give a brief count (e.g. "I found 5 results — the top one is ...").
+- If the answer is short (1–2 sentences of plain prose), the spoken_summary may be identical to the answer.
 
 Respond with JSON only:
 {
-  "answer": "clean, concise final answer"
+  "answer": "clean answer using markdown where helpful",
+  "spoken_summary": "1-2 sentence voice-friendly summary"
 }`;
+
+const TAVILY_SYNTHESIS_SYSTEM_PROMPT = `You synthesize web search results into a concise, spoken-friendly answer.
+The answer will be read aloud, so write in plain, natural language — no markdown, no bullet lists, no URLs.
+Keep it under 3 sentences unless more detail is genuinely needed.
+If the search results don't contain the answer, say so briefly.
+
+Respond with JSON only:
+{
+  "answer": "the spoken answer"
+}`;
+
+async function synthesizeTavilyAnswer(
+  ai: GoogleGenAI,
+  userRequest: string,
+  searchSummary: string,
+  historyContext?: string
+): Promise<string> {
+  const generateContent = ai?.models?.generateContent;
+  if (typeof generateContent !== "function") {
+    // No Gemini available — return the raw Tavily summary directly.
+    return searchSummary;
+  }
+
+  try {
+    const contextSection = historyContext
+      ? `[Conversation history]\n${historyContext}\n\n`
+      : "";
+    const response = await generateContent({
+      model: "gemini-2.5-flash",
+      contents:
+        `${TAVILY_SYNTHESIS_SYSTEM_PROMPT}\n\n` +
+        `${contextSection}` +
+        `User asked: "${userRequest}"\n\n` +
+        `Web search results:\n${searchSummary}`,
+      config: { responseMimeType: "application/json" },
+    });
+
+    const text = response.text;
+    if (!text) return searchSummary;
+
+    let parsed: { answer?: unknown };
+    try {
+      parsed = JSON.parse(text) as { answer?: unknown };
+    } catch {
+      return searchSummary;
+    }
+
+    if (typeof parsed.answer === "string" && parsed.answer.trim()) {
+      return parsed.answer.trim();
+    }
+    return searchSummary;
+  } catch (err) {
+    console.error("[Orchestrator] Tavily answer synthesis failed:", err);
+    return searchSummary;
+  }
+}
 
 const BROWSER_QUERY_REFINEMENT_SYSTEM_PROMPT = `You compress a user request into a short Browser Use task query.
 Return JSON only:
@@ -705,13 +877,21 @@ function resolveExecutionIntent(
   return classifiedIntent;
 }
 
+export interface RefinedOutput {
+  /** Full markdown-formatted answer shown in the response card. */
+  displayText: string;
+  /** Short plain-English summary for TTS playback (may equal displayText for short answers). */
+  spokenSummary: string;
+}
+
 export async function refineOutputWithGemini(
   ai: GoogleGenAI,
   userRequest: string,
   rawOutput: string,
   historyContext?: string
-): Promise<string> {
-  const fallback = toCoreNarrationText(rawOutput);
+): Promise<RefinedOutput> {
+  const fallbackText = toCoreNarrationText(rawOutput);
+  const fallback: RefinedOutput = { displayText: fallbackText, spokenSummary: fallbackText };
   const generateContent = ai?.models?.generateContent;
 
   if (typeof generateContent !== "function") {
@@ -737,9 +917,9 @@ export async function refineOutputWithGemini(
       return fallback;
     }
 
-    let parsed: { answer?: unknown };
+    let parsed: { answer?: unknown; spoken_summary?: unknown };
     try {
-      parsed = JSON.parse(responseText) as { answer?: unknown };
+      parsed = JSON.parse(responseText) as { answer?: unknown; spoken_summary?: unknown };
     } catch {
       return fallback;
     }
@@ -748,12 +928,17 @@ export async function refineOutputWithGemini(
       return fallback;
     }
 
-    const normalized = normalizeNarrationText(parsed.answer);
-    if (!normalized) {
+    const displayText = normalizeNarrationText(parsed.answer);
+    if (!displayText) {
       return fallback;
     }
 
-    return normalized;
+    const spokenSummary =
+      typeof parsed.spoken_summary === "string" && parsed.spoken_summary.trim()
+        ? parsed.spoken_summary.trim()
+        : normalizeNarrationText(parsed.answer);
+
+    return { displayText, spokenSummary };
   } catch (err) {
     console.error("[Orchestrator] Output refinement failed:", err);
     return fallback;
@@ -795,6 +980,104 @@ function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// Responses shorter than this threshold are already concise enough to speak as-is.
+const SUMMARY_THRESHOLD_CHARS = 280;
+
+const VOICE_SUMMARY_SYSTEM_PROMPT = `You summarize a detailed text response into a short spoken voice summary.
+The summary will be read aloud by a text-to-speech voice, so:
+- Write in plain, natural spoken English — no markdown, no bullet points, no numbered lists, no bold/italic markers.
+- Cover only the most important single finding or key takeaway. The user can read the full details on screen.
+- Keep it to 1–2 sentences maximum.
+- Do not start with "Here is", "Sure", "Certainly", or filler phrases.
+- If the response is a list of items, name the top item or give a brief count summary (e.g. "I found 5 results — the top one is ...").
+- If the response is an error or blocked action, state it as-is in one sentence.
+
+Respond with JSON only:
+{
+  "summary": "the spoken summary"
+}`;
+
+/**
+ * Generate a short, voice-friendly spoken summary of a potentially long display text.
+ * Returns the summary string on success, or a normalised plain-text fallback on failure.
+ */
+async function summarizeForSpeech(
+  ai: GoogleGenAI,
+  displayText: string
+): Promise<string> {
+  // Short responses are already concise — skip the extra Gemini round-trip.
+  if (displayText.length <= SUMMARY_THRESHOLD_CHARS) {
+    return normalizeNarrationText(displayText);
+  }
+
+  const generateContent = ai?.models?.generateContent;
+  if (typeof generateContent !== "function") {
+    return normalizeNarrationText(displayText);
+  }
+
+  try {
+    const response = await generateContent({
+      model: "gemini-2.5-flash",
+      contents: `${VOICE_SUMMARY_SYSTEM_PROMPT}\n\nFull response to summarise:\n${displayText}`,
+      config: { responseMimeType: "application/json" },
+    });
+
+    const responseText = response.text;
+    if (!responseText) return normalizeNarrationText(displayText);
+
+    let parsed: { summary?: unknown };
+    try {
+      parsed = JSON.parse(responseText) as { summary?: unknown };
+    } catch {
+      return normalizeNarrationText(displayText);
+    }
+
+    if (typeof parsed.summary === "string" && parsed.summary.trim()) {
+      return parsed.summary.trim();
+    }
+    return normalizeNarrationText(displayText);
+  } catch (err) {
+    console.error("[Orchestrator] Voice summary generation failed:", err);
+    return normalizeNarrationText(displayText);
+  }
+}
+
+// Maps integration names returned by the tool-guide (e.g. "Gmail", "Google Drive")
+// to the tool IDs used by the browser adapter and AVAILABLE_TOOL_IDS.
+const INTEGRATION_NAME_TO_TOOL_ID: Record<string, ToolId> = {
+  gmail: "gmail",
+  "google mail": "gmail",
+  outlook: "outlook",
+  "microsoft outlook": "outlook",
+  discord: "discord",
+  slack: "slack",
+  dropbox: "dropbox",
+  "google drive": "google_drive",
+  "google_drive": "google_drive",
+  "google sheets": "google_sheets",
+  "google_sheets": "google_sheets",
+  supabase: "supabase",
+  "google calendar": "google_calendar",
+  "google_calendar": "google_calendar",
+  "google docs": "google_docs",
+  "google_docs": "google_docs",
+  notion: "notion",
+  exa: "exa",
+  github: "github",
+  jira: "jira",
+  atlassian: "jira",
+  linear: "linear",
+  figma: "figma",
+  hubspot: "hubspot",
+  salesforce: "salesforce",
+  stripe: "stripe",
+};
+
+function mapToolPlanIntegrationToToolId(name: string): ToolId | null {
+  const lower = name.toLowerCase().trim();
+  return INTEGRATION_NAME_TO_TOOL_ID[lower] ?? null;
+}
+
 function resolveDeps(maybeDeps: TranscriptFinalOverrideDeps | undefined): TranscriptFinalDeps {
   return {
     classify: maybeDeps?.classify ?? maybeDeps?.classifyIntent ?? defaultDeps.classify,
@@ -832,32 +1115,87 @@ export async function handleTranscriptFinal(
   try {
     session.setState("thinking");
 
-    const classified = await deps.classify(ai, text, historyContext || undefined);
-    const result: IntentResult =
-      classified.intent === "clarify"
-        ? {
-            ...classified,
-            intent: "search",
-            confidence: Math.max(classified.confidence, 0.51),
-            query: classified.query || text,
-            clarification: undefined,
-          }
-        : classified;
-    session.send({ type: "intent", intent: result });
-    if (classified.intent === "clarify") {
-      session.send({
-        type: "action_status",
-        message: "Intent was ambiguous; proceeding proactively with best-effort execution.",
-      });
+    // Resolve underspecified/context-dependent requests using session history.
+    // e.g. "show me more", "what about that one", "it" → fully specified query.
+    let resolvedText = text;
+    if (historyContext && isTranscriptUnderspecified(text)) {
+      const expanded = await resolveTranscriptWithContext(ai, text, historyContext);
+      if (expanded !== text) {
+        resolvedText = expanded;
+        console.log(`[Orchestrator] Context-resolved: "${text}" → "${resolvedText}"`);
+        session.send({ type: "action_status", message: `Context: ${resolvedText}` });
+      }
     }
 
+    const classified = await deps.classify(ai, resolvedText, historyContext || undefined);
+
+    // When the model genuinely can't determine intent, ask the user for clarification
+    // rather than guessing. The session stays alive; the next text_input resumes the turn.
+    if (classified.intent === "clarify") {
+      const question =
+        classified.clarification ||
+        "Could you give me a bit more detail about what you'd like me to do?";
+      session.send({ type: "clarification_request", question });
+      session.setState("idle");
+      // Record in history so the follow-up response has full context.
+      // Compaction runs in the background — it must not block the session
+      // staying open for the user's clarification reply.
+      if (history) {
+        history.recentTurns.push({
+          transcript: text,
+          response: `Asked for clarification: ${question}`,
+        });
+        maybeCompactHistory(ai, history).catch((err) =>
+          console.error("[Orchestrator] Background compaction error (clarify):", err)
+        );
+      }
+      return; // Do NOT send "done" — session remains open for the user's reply
+    }
+
+    const result: IntentResult = classified;
+    session.send({ type: "intent", intent: result });
+
     if (result.intent === "quick_answer") {
-      const answer = result.answer || "I'm not sure how to answer that.";
+      let answer: string;
+
+      if (result.needs_web_search && env.TAVILY_API_KEY) {
+        // Fast web search path: use Tavily to get live data, then let Gemini
+        // synthesize a clean spoken answer from the results.
+        session.send({ type: "action_status", message: "Searching the web..." });
+        const tavilyResult = await tavilySearch(
+          resolvedText,
+          env.TAVILY_API_KEY,
+          (msg) => session.send({ type: "action_status", message: msg })
+        );
+
+        if (tavilyResult && tavilyResult.summary) {
+          answer = await synthesizeTavilyAnswer(
+            ai,
+            resolvedText,
+            tavilyResult.summary,
+            historyContext || undefined
+          );
+        } else {
+          // Tavily failed or returned nothing — fall back to Gemini-only answer.
+          answer = result.answer || "I wasn't able to find a current answer to that.";
+        }
+      } else {
+        // Pure Gemini knowledge answer (no web search needed).
+        answer = result.answer || "I'm not sure how to answer that.";
+      }
+
       session.setState("speaking");
-      await deps.narrate(session, answer, apiKey);
+      // quick_answer responses come from Gemini/Tavily already written for voice,
+      // so they are usually already concise. Still run through summarizeForSpeech
+      // to catch any cases where the answer grew long.
+      const spokenAnswer = await summarizeForSpeech(ai, answer);
+      await deps.narrate(session, answer, apiKey, spokenAnswer);
+      // Push history and compact in the background — don't block the done event.
       if (history) {
         history.recentTurns.push({ transcript: text, response: answer });
-        await maybeCompactHistory(ai, history);
+        maybeCompactHistory(ai, history).catch((err) =>
+          console.error("[Orchestrator] Background compaction error (quick_answer):", err)
+        );
       }
       session.setState("idle");
       session.send({ type: "done" });
@@ -883,16 +1221,22 @@ export async function handleTranscriptFinal(
       return;
     }
 
-    // Tool Guide: determine optimal execution strategy
-    const toolPlan = await generateToolPlan(ai, text, result.intent, historyContext || undefined);
-    console.log(`[ToolGuide] Strategy: ${toolPlan.strategy}, integrations: [${toolPlan.integrations.join(", ")}]`);
-    session.send({
-      type: "action_status",
-      message: toolPlan.integrations.length
-        ? `Using ${toolPlan.integrations.join(", ")} → ${toolPlan.reasoning}`
-        : toolPlan.reasoning,
-    });
+    // web_extract and multi_site_compare route directly to runTool() and don't
+    // need integration routing — skip the generateToolPlan Gemini call for them.
+    const needsToolPlan = result.intent !== "web_extract" && result.intent !== "multi_site_compare";
+    const toolPlan = needsToolPlan
+      ? await generateToolPlan(ai, resolvedText, result.intent, historyContext || undefined)
+      : null;
 
+    if (toolPlan) {
+      console.log(`[ToolGuide] Strategy: ${toolPlan.strategy}, integrations: [${toolPlan.integrations.join(", ")}]`);
+      session.send({
+        type: "action_status",
+        message: toolPlan.integrations.length
+          ? `Using ${toolPlan.integrations.join(", ")} → ${toolPlan.reasoning}`
+          : toolPlan.reasoning,
+      });
+    }
 
     session.setState("acting");
 
@@ -900,8 +1244,8 @@ export async function handleTranscriptFinal(
       onStatus: (msg: string) => session.send({ type: "action_status", message: msg }),
     };
 
-    // Use enhanced prompt from tool guide when available
-    const taskQuery = toolPlan.enhanced_prompt || text;
+    // Use enhanced prompt from tool guide when available; fall back to context-resolved text.
+    const taskQuery = toolPlan?.enhanced_prompt || resolvedText;
 
     let output: string;
     const browser = deps.createBrowserAdapter(deps.browserApiKey);
@@ -934,11 +1278,51 @@ export async function handleTranscriptFinal(
       }
     } else {
       try {
+        // Resolve integration options from the tool guide's plan.
+        // When Gemini identified a specific integration (Gmail, Slack, etc.),
+        // pass it through to the browser adapter so BrowserUse uses that
+        // connected integration instead of generic web navigation.
+        let integrationOptions: {
+          forceIntegration?: boolean;
+          preferredToolId?: ToolId;
+          integrationInstruction?: string;
+        } = {};
+
+        if (toolPlan && toolPlan.strategy !== "browser_only" && toolPlan.integrations.length > 0) {
+          const primaryIntegration = toolPlan.integrations[0];
+          const mappedToolId = mapToolPlanIntegrationToToolId(primaryIntegration);
+          if (mappedToolId && INTEGRATION_TOOL_IDS.has(mappedToolId)) {
+            const instruction = buildIntegrationInstructionForTool(mappedToolId, resolvedText);
+            integrationOptions = {
+              forceIntegration: true,
+              preferredToolId: mappedToolId,
+              integrationInstruction: instruction,
+            };
+            console.log(`[Orchestrator] Routing to integration: ${mappedToolId} (from tool plan: "${primaryIntegration}")`);
+          }
+        }
+
+        // Hard fallback: if Gemini returned browser_only but the user's request
+        // clearly targets a connected integration (e.g. "check my email"), override it.
+        if (!integrationOptions.preferredToolId) {
+          const detectedTool = detectExplicitIntegrationTool(resolvedText);
+          if (detectedTool) {
+            const instruction = buildIntegrationInstructionForTool(detectedTool, resolvedText);
+            integrationOptions = {
+              forceIntegration: true,
+              preferredToolId: detectedTool,
+              integrationInstruction: instruction,
+            };
+            console.log(`[Orchestrator] Hard-override to integration: ${detectedTool} (keyword match on "${resolvedText}")`);
+          }
+        }
+
         if (result.intent === "search") {
-          output = await browser.runSearch(taskQuery, statusCb);
+          output = await browser.runSearch(taskQuery, statusCb, integrationOptions);
         } else {
           output = await browser.runFormFillDraft(taskQuery, statusCb, {
             allowSubmit: env.ALLOW_FINAL_FORM_SUBMISSION,
+            ...integrationOptions,
           });
         }
       } catch (err) {
@@ -949,13 +1333,19 @@ export async function handleTranscriptFinal(
 
     session.setBrowserAdapter(null);
     session.setState("speaking");
-    const refinedOutput = await deps.refineOutput(ai, text, output, historyContext || undefined);
-    await deps.narrate(session, refinedOutput, apiKey);
+    // refineOutputWithGemini now produces both the display text and a spoken
+    // summary in a single Gemini call, saving a sequential round-trip.
+    const { displayText: refinedOutput, spokenSummary } = await deps.refineOutput(
+      ai, resolvedText, output, historyContext || undefined
+    );
+    await deps.narrate(session, refinedOutput, apiKey, spokenSummary);
 
-    // Append this turn to history and compact if needed
+    // Push history and compact in the background — don't block the done event.
     if (history) {
       history.recentTurns.push({ transcript: text, response: refinedOutput });
-      await maybeCompactHistory(ai, history);
+      maybeCompactHistory(ai, history).catch((err) =>
+        console.error("[Orchestrator] Background compaction error (browser):", err)
+      );
     }
 
     session.setState("idle");

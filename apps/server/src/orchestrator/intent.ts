@@ -6,27 +6,47 @@ const intentResultSchema = z.object({
   intent: z.enum(["search", "form_fill_draft", "clarify", "web_extract", "multi_site_compare", "quick_answer"]),
   confidence: z.number().min(0).max(1),
   query: z.string(),
-  clarification: z.string().optional(),
-  answer: z.string().optional(),
+  // Gemini may return explicit null for optional fields when they are not
+  // applicable — use .nullish() (= null | undefined | string) then normalize
+  // null → undefined so the rest of the code only ever sees string | undefined.
+  clarification: z.string().nullish(),
+  answer: z.string().nullish(),
+  needs_web_search: z.boolean().nullish(),
 });
 
 const SYSTEM_PROMPT = `You are an intent classifier for a voice-controlled browser agent.
 Classify the user's speech into exactly ONE of these intents:
 
-- "quick_answer": The user is asking something you can answer directly from your own knowledge WITHOUT browsing the web. Examples: jokes, trivia, math, definitions, conversational questions ("tell me a joke", "what is 25 times 4", "explain photosynthesis", "how are you"). Provide the answer directly in the "answer" field.
-- "search": The user wants to search for information on the web (e.g. "search for restaurants near me", "look up the weather", "find cheap flights to LA")
-- "form_fill_draft": The user wants to fill out a form on a website (e.g. "fill out the contact form", "sign up for the newsletter", "enter my shipping address"). This is draft only - never submit.
-- "web_extract": The user wants to read, extract, or summarize content from a specific webpage (e.g. "read this page", "summarize that article", "what does this site say about X")
-- "multi_site_compare": The user wants to compare information across multiple websites (e.g. "compare prices on Amazon vs Best Buy", "which site has better reviews for X", "compare X across sites")
-- "clarify": The intent is truly impossible to infer. Use this only as a last resort.
+- "quick_answer": The user is asking something that can be answered without a full browser session.
+  Two sub-cases:
+  1. Answerable from your own knowledge (jokes, trivia, math, definitions, conversational): set needs_web_search=false and fill the "answer" field.
+  2. Needs a live web lookup but NOT a full browser session — current weather, live stock prices, sports scores, today's news headlines, current exchange rates, recent events: set needs_web_search=true and leave "answer" empty. A fast search will be run for you.
+- "search": The user wants to browse, navigate, or interact with the web in a way that requires a full browser (clicking, logging in, complex multi-step navigation, form interaction beyond simple lookup).
+- "form_fill_draft": The user wants to fill out a form on a website. Draft only — never submit.
+- "web_extract": The user wants to read, extract, or summarize a specific webpage (URL provided or implied).
+- "multi_site_compare": The user wants to compare information across multiple websites.
+- "clarify": The request is missing critical information. Use when the task cannot be reasonably inferred — "book a flight" (no destination), "send an email" (no recipient), "search for it" (no subject). You MUST include a short, specific question in the "clarification" field.
+
+## needs_web_search decision guide
+Set needs_web_search=true (and intent="quick_answer") when the question is:
+- A simple factual lookup that changes over time: weather, stock prices, sports scores, exchange rates, news, "what movies are showing", "what's the temperature in X"
+- Answerable with a short web search result, NOT requiring clicking/logging in/navigating pages
+
+Set needs_web_search=false (and intent="quick_answer") when:
+- You can answer from training data: math, definitions, jokes, historical facts, general knowledge
+
+Use intent="search" (not quick_answer) when the task requires interacting with a website, logging in, or multi-step navigation.
+
+IMPORTANT: When intent is "clarify", the "clarification" field is required and must contain a single, specific question to ask the user.
 
 Respond with JSON only:
 {
-  "intent": "quick_answer" | "search" | "form_fill_draft" | "clarify",
+  "intent": "quick_answer" | "search" | "form_fill_draft" | "web_extract" | "multi_site_compare" | "clarify",
   "confidence": 0.0 to 1.0,
   "query": "the original user text",
-  "clarification": "optional question to ask if intent is clarify",
-  "answer": "direct answer if intent is quick_answer"
+  "clarification": "required when intent is clarify — one specific question",
+  "answer": "direct answer if intent is quick_answer and needs_web_search is false",
+  "needs_web_search": true | false
 }`;
 
 const FALLBACK: IntentResult = {
@@ -89,19 +109,33 @@ export async function classifyIntent(
     }
 
     const parsed = intentResultSchema.parse(JSON.parse(text));
-    const inferredIntent = inferIntentFromTranscript(transcript);
-    const normalizedIntent =
-      parsed.intent === "clarify" ? inferredIntent : parsed.intent;
 
-    if (parsed.confidence < 0.6) {
+    // Normalize nullish fields — Gemini may return explicit null for optional
+    // fields that don't apply (e.g. "answer": null when needs_web_search=true).
+    const normalized = {
+      ...parsed,
+      query: transcript,
+      clarification: parsed.clarification ?? undefined,
+      answer: parsed.answer ?? undefined,
+      needs_web_search: parsed.needs_web_search ?? undefined,
+    };
+
+    // Trust the model's clarify classification — the orchestrator handles the fallback question.
+    if (normalized.intent === "clarify") {
+      return normalized;
+    }
+
+    // For non-clarify intents, fall back to rule-based inference when confidence is low.
+    const inferredIntent = inferIntentFromTranscript(transcript);
+    if (normalized.confidence < 0.6) {
       return {
-        intent: normalizedIntent,
-        confidence: Math.max(parsed.confidence, 0.51),
+        intent: inferredIntent,
+        confidence: Math.max(normalized.confidence, 0.51),
         query: transcript,
       };
     }
 
-    return { ...parsed, intent: normalizedIntent, query: transcript };
+    return normalized;
   } catch (err) {
     console.error("[Intent] Classification failed:", err);
     return {

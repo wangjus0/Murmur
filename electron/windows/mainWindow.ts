@@ -166,10 +166,6 @@ export function createMainWindow(options: CreateMainWindowOptions = {}): Browser
     win.show();
   });
 
-  win.on("closed", () => {
-    mainWindow = null;
-  });
-
   return win;
 }
 

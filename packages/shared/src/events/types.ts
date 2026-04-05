@@ -8,6 +8,11 @@ export interface IntentResult {
   query: string;
   clarification?: string;
   answer?: string;
+  /** When true on a quick_answer intent, the orchestrator should run a Tavily
+   *  web search and synthesize the result before narrating. Used for live data
+   *  queries (weather, stock prices, sports scores, current news, etc.) that
+   *  don't need full browser automation. */
+  needs_web_search?: boolean;
 }
 
 // ── Client → Server events ─────────────────────────────────
@@ -24,17 +29,24 @@ export interface AudioChunkEvent {
 
 export interface AudioEndEvent {
   type: "audio_end";
+  context?: string;
 }
 
 export interface InterruptEvent {
   type: "interrupt";
 }
 
+export interface TextInputEvent {
+  type: "text_input";
+  text: string;
+}
+
 export type ClientEvent =
   | StartSessionEvent
   | AudioChunkEvent
   | AudioEndEvent
-  | InterruptEvent;
+  | InterruptEvent
+  | TextInputEvent;
 
 // ── Server → Client events ─────────────────────────────────
 export interface SessionStartedEvent {
@@ -86,6 +98,11 @@ export interface ErrorEvent {
   message: string;
 }
 
+export interface ClarificationRequestEvent {
+  type: "clarification_request";
+  question: string;
+}
+
 export type ServerEvent =
   | SessionStartedEvent
   | StateEvent
@@ -96,4 +113,5 @@ export type ServerEvent =
   | NarrationTextEvent
   | NarrationAudioEvent
   | DoneEvent
-  | ErrorEvent;
+  | ErrorEvent
+  | ClarificationRequestEvent;

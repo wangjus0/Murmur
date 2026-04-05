@@ -28,6 +28,7 @@ export interface SessionState {
   narrationText: string;
   actionStatuses: string[];
   error: string | null;
+  clarificationQuestion: string | null;
 
   // Actions
   setConnected: (connected: boolean) => void;
@@ -42,6 +43,7 @@ export interface SessionState {
   addActionStatus: (message: string) => void;
   clearActionStatuses: () => void;
   setError: (error: string | null) => void;
+  setClarificationQuestion: (question: string | null) => void;
   reset: () => void;
 }
 
@@ -56,6 +58,7 @@ const initialState = {
   narrationText: "",
   actionStatuses: [] as string[],
   error: null,
+  clarificationQuestion: null as string | null,
 };
 
 const TIMELINE_MAX_ITEMS = 200;
@@ -91,5 +94,6 @@ export const useSessionStore = create<SessionState>((set) => ({
     set((s) => ({ actionStatuses: [...s.actionStatuses, message] })),
   clearActionStatuses: () => set({ actionStatuses: [] }),
   setError: (error) => set({ error }),
+  setClarificationQuestion: (question) => set({ clarificationQuestion: question }),
   reset: () => set(initialState),
 }));

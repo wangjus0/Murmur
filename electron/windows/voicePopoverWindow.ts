@@ -1,5 +1,5 @@
 import path from "node:path";
-import { app, BrowserWindow, screen } from "electron";
+import { app, BrowserWindow, screen, shell } from "electron";
 
 const DEV_RENDERER_ORIGIN = "http://localhost:5173";
 
@@ -48,6 +48,15 @@ export function createVoicePopoverWindow(): BrowserWindow {
   // Log popover console messages to the terminal
   win.webContents.on("console-message", (_event, _level, message) => {
     console.log("[popover]", message);
+  });
+  // Open all links in the system browser — never navigate the popover window
+  win.webContents.on("will-navigate", (event, url) => {
+    event.preventDefault();
+    void shell.openExternal(url);
+  });
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    void shell.openExternal(url);
+    return { action: "deny" };
   });
   win.setAlwaysOnTop(true, "screen-saver");
   win.setVisibleOnAllWorkspaces(true, {

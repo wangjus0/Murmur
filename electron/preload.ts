@@ -27,8 +27,15 @@ const desktopApi = Object.freeze({
     showPopover: () => ipcRenderer.invoke("shortcut:show-popover"),
     repositionPopover: (position: "center" | "top-right") =>
       ipcRenderer.invoke("shortcut:reposition-popover", position),
-    resizePopover: (width: number, height: number) =>
-      ipcRenderer.invoke("shortcut:resize-popover", width, height),
+    resizePopover: (width: number, height: number, anchorBottom?: boolean) =>
+      ipcRenderer.invoke("shortcut:resize-popover", width, height, anchorBottom),
+    onPopoverDidShow: (listener: () => void) => {
+      const wrappedListener = () => listener();
+      ipcRenderer.on("popover:did-show", wrappedListener);
+      return () => {
+        ipcRenderer.removeListener("popover:did-show", wrappedListener);
+      };
+    },
   },
   auth: {
     startGoogleOAuth: (authUrl: string) => ipcRenderer.invoke("auth:start-google-oauth", authUrl),

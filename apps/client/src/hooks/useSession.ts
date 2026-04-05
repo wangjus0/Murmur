@@ -83,6 +83,7 @@ export function useSession(
         case "done":
           store.getState().setTurnState("idle");
           store.getState().clearActionStatuses();
+          store.getState().setClarificationQuestion(null);
           store.getState().addActionTimelineItem({
             kind: "done",
             message: "Turn completed",
@@ -93,6 +94,13 @@ export function useSession(
           store.getState().addActionTimelineItem({
             kind: "error",
             message: event.message,
+          });
+          break;
+        case "clarification_request":
+          store.getState().setClarificationQuestion(event.question);
+          store.getState().addActionTimelineItem({
+            kind: "action",
+            message: `Clarification needed: ${event.question}`,
           });
           break;
       }
@@ -124,13 +132,17 @@ export function useSession(
     socketRef.current?.send({ type: "audio_chunk", data });
   }, []);
 
-  const sendAudioEnd = useCallback(() => {
-    socketRef.current?.send({ type: "audio_end" });
+  const sendAudioEnd = useCallback((context?: string) => {
+    socketRef.current?.send({ type: "audio_end", ...(context ? { context } : {}) });
   }, []);
 
   const sendInterrupt = useCallback(() => {
     socketRef.current?.send({ type: "interrupt" });
   }, []);
 
-  return { sendStartSession, sendAudioChunk, sendAudioEnd, sendInterrupt };
+  const sendTextInput = useCallback((text: string) => {
+    socketRef.current?.send({ type: "text_input", text });
+  }, []);
+
+  return { sendStartSession, sendAudioChunk, sendAudioEnd, sendInterrupt, sendTextInput };
 }

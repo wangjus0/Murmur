@@ -146,7 +146,7 @@ export class Session {
         void this.onAudioChunk(event.data);
         break;
       case "audio_end":
-        this.onAudioEnd().catch((err) => {
+        this.onAudioEnd(event.context).catch((err) => {
           console.error(`[session:${this.id}] onAudioEnd error:`, err);
           this.setState("idle");
           this.send({ type: "error", message: "Failed to process audio" });
@@ -154,6 +154,13 @@ export class Session {
         break;
       case "interrupt":
         this.onInterrupt();
+        break;
+      case "text_input":
+        this.onTextInput(event.text).catch((err) => {
+          console.error(`[session:${this.id}] onTextInput error:`, err);
+          this.setState("idle");
+          this.send({ type: "error", message: "Failed to process text input" });
+        });
         break;
     }
   }
@@ -209,7 +216,7 @@ export class Session {
     this.stt.sendAudio(data);
   }
 
-  private async onAudioEnd(): Promise<void> {
+  private async onAudioEnd(context?: string): Promise<void> {
     console.log(`[session:${this.id}] Audio stream ended`);
 
     if (this.stt) {
@@ -217,7 +224,10 @@ export class Session {
       this.stt = null;
     }
 
-    const transcript = this.accumulatedTranscript.trim();
+    const voiceTranscript = this.accumulatedTranscript.trim();
+    const transcript = context
+      ? `${context.trim()}\n\n${voiceTranscript}`.trim()
+      : voiceTranscript;
     console.log(`[session:${this.id}] Transcript (${transcript.length} chars): "${transcript}" (state: ${this.state})`);
     if (!transcript) {
       console.warn(`[session:${this.id}] Empty transcript — STT may not have flushed in time`);
@@ -245,6 +255,35 @@ export class Session {
     } else {
       this.setState("idle");
     }
+  }
+
+  private async onTextInput(text: string): Promise<void> {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+
+    console.log(`[session:${this.id}] Text input (${trimmed.length} chars): "${trimmed}"`);
+    this.memoryPersistence?.persistTranscript(this.id, trimmed);
+    this.send({ type: "transcript_final", text: trimmed });
+
+    await handleTranscriptFinal(
+      this,
+      this.ai,
+      env.ELEVEN_LABS_API_KEY,
+      trimmed,
+      this.conversationHistory,
+      env.NAVIGATION_ALLOWLIST,
+      {
+        browserApiKey: this.browserUseApiKeyOverride ?? env.BROWSER_USE_API_KEY,
+        browserApiKeySource: this.browserUseApiKeyOverride ? "user" : "server",
+        createBrowserAdapter: () =>
+          new BrowserAdapter(
+            this.browserUseApiKeyOverride ?? env.BROWSER_USE_API_KEY,
+            {
+              profileId: this.browserProfileId ?? env.BROWSER_USE_PROFILE_ID ?? null,
+            }
+          ),
+      }
+    );
   }
 
   private onInterrupt(): void {
