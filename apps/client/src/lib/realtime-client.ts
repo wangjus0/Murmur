@@ -3,7 +3,7 @@ import type {
   ClientToServerPayloadMap,
   MessageEnvelope,
   ServerToClientMessage,
-} from '@diamond/shared'
+} from '@murmur/shared'
 
 import { parseServerMessage } from './contracts.js'
 

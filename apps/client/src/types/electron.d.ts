@@ -23,12 +23,18 @@ type DesktopAuthApi = {
   onOAuthCallback: (listener: (callbackUrl: string) => void) => () => void;
 };
 
+type DesktopPermissionsApi = {
+  requestMicrophoneAccess: () => Promise<boolean>;
+  openMicrophoneSettings: () => Promise<void>;
+};
+
 type DesktopApi = {
   ping: () => string;
   getRuntimeInfo: () => DesktopRuntimeInfo;
   getSupabaseConfig: () => DesktopSupabaseConfig;
   shortcut?: DesktopShortcutApi;
   auth?: DesktopAuthApi;
+  permissions?: DesktopPermissionsApi;
 };
 
 declare global {

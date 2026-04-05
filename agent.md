@@ -1,4 +1,4 @@
-# Agent Context: DiamondHacks 2026 MVP
+# Agent Context: Murmur MVP
 
 This file gives coding agents shared context for this repository.
 

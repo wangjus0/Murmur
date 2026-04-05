@@ -34,6 +34,10 @@ const desktopApi = Object.freeze({
       };
     },
   },
+  permissions: {
+    requestMicrophoneAccess: () => ipcRenderer.invoke("permissions:request-microphone-access"),
+    openMicrophoneSettings: () => ipcRenderer.invoke("permissions:open-microphone-settings"),
+  },
 });
 
 contextBridge.exposeInMainWorld("desktop", desktopApi);

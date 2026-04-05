@@ -2,8 +2,11 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import type { User } from "@supabase/supabase-js";
 import { getSupabaseClient } from "../../lib/supabase";
 import { parseOAuthCallback } from "./oauth";
-
-const OAUTH_REDIRECT_URL = "murmur://auth/callback";
+import {
+  buildRedirectConfigurationError,
+  isRedirectConfigurationError,
+  resolveAuthRedirectUrl,
+} from "./redirect";
 
 type AuthContextValue = {
   user: User | null;
@@ -21,6 +24,7 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const supabase = useMemo(() => getSupabaseClient(), []);
+  const authRedirectUrl = useMemo(() => resolveAuthRedirectUrl(), []);
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -54,10 +58,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      if (parsed.type === "recovery") {
+      if (parsed.type === "otp") {
         const { error } = await supabase.auth.verifyOtp({
           token_hash: parsed.tokenHash,
-          type: "recovery",
+          type: parsed.otpType,
         });
         if (error) {
           setAuthError(error.message);
@@ -138,6 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       if (error) {
         setAuthError(error.message);
+        throw new Error(error.message);
       }
     },
     [supabase],
@@ -149,25 +154,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { error } = await supabase.auth.signUp({
         email,
         password,
+        options: {
+          emailRedirectTo: authRedirectUrl,
+        },
       });
+
       if (error) {
+        if (isRedirectConfigurationError(error.message)) {
+          const message = buildRedirectConfigurationError(authRedirectUrl);
+          setAuthError(message);
+          throw new Error(message);
+        }
+
         setAuthError(error.message);
+        throw new Error(error.message);
       }
     },
-    [supabase],
+    [authRedirectUrl, supabase],
   );
 
   const sendPasswordReset = useCallback(
     async (email: string) => {
       setAuthError(null);
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: OAUTH_REDIRECT_URL,
+        redirectTo: authRedirectUrl,
       });
       if (error) {
         setAuthError(error.message);
+        throw new Error(error.message);
       }
     },
-    [supabase],
+    [authRedirectUrl, supabase],
   );
 
   const signInWithGoogle = useCallback(async () => {
@@ -181,7 +198,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: OAUTH_REDIRECT_URL,
+        redirectTo: authRedirectUrl,
         skipBrowserRedirect: true,
       },
     });
@@ -197,7 +214,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     await authApi.startGoogleOAuth(data.url);
-  }, [supabase]);
+  }, [authRedirectUrl, supabase]);
 
   const signOut = useCallback(async () => {
     setAuthError(null);

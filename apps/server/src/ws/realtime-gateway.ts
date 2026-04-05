@@ -9,7 +9,7 @@ import type {
   ClientToServerMessageInput,
   ServerToClientEventName,
   ServerToClientPayloadMap,
-} from '@diamond/shared'
+} from '@murmur/shared'
 import { parseClientMessage, stringifyServerEnvelope, type RawSocketMessage } from './contracts.js'
 
 type WebSocketState = 0 | 1 | 2 | 3

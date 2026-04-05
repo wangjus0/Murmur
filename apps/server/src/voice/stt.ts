@@ -1,5 +1,5 @@
 import { WebSocket, type RawData } from "ws";
-import { STT_MODEL_ID, AUDIO_FORMAT } from "@diamond/shared";
+import { STT_MODEL_ID, AUDIO_FORMAT } from "@murmur/shared";
 
 interface SttCallbacks {
   onPartial: (text: string) => void;

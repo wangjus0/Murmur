@@ -1,5 +1,5 @@
 {
-  "name": "@diamond/client",
+  "name": "@murmur/client",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -8,7 +8,7 @@
     "build": "vite build"
   },
   "dependencies": {
-    "@diamond/shared": "*",
+    "@murmur/shared": "*",
     "@supabase/supabase-js": "^2.101.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

@@ -1,5 +1,5 @@
-import type { ClientEvent, ServerEvent } from "@diamond/shared";
-import { parseServerEvent } from "@diamond/shared";
+import type { ClientEvent, ServerEvent } from "@murmur/shared";
+import { parseServerEvent } from "@murmur/shared";
 
 const MAX_BACKOFF_MS = 10_000;
 

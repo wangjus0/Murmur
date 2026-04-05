@@ -54,12 +54,12 @@ const INITIAL_STEP_ERRORS: Record<StepKey, StepErrors> = {
 
 const LAST_STEP_INDEX = STEP_META.length - 1;
 
-function InlineError({ message }: { message?: string }) {
+function InlineError({ message, id }: { message?: string; id: string }) {
   if (!message) {
     return null;
   }
 
-  return <p style={{ margin: "4px 0 0", color: "#fda4af", fontSize: "13px" }}>{message}</p>;
+  return <p id={id} className="field-error">{message}</p>;
 }
 
 function AccountStep(props: {
@@ -69,29 +69,31 @@ function AccountStep(props: {
   onWorkspaceNameChange: (value: string) => void;
 }) {
   return (
-    <div style={{ display: "grid", gap: "12px" }}>
-      <label style={{ display: "grid", gap: "6px" }}>
-        Display name (placeholder)
+    <div className="onboarding-fields">
+      <label className="field">
+        <span className="field-label">Display name (placeholder)</span>
         <input
           type="text"
           value={props.data.displayName}
           onChange={(event) => props.onDisplayNameChange(event.target.value)}
           placeholder="Alex Rivera"
-          style={{ borderRadius: "10px", border: "1px solid #334155", padding: "10px 12px" }}
+          aria-invalid={Boolean(props.errors.displayName)}
+          aria-describedby={props.errors.displayName ? "display-name-error" : undefined}
         />
-        <InlineError message={props.errors.displayName} />
+        <InlineError id="display-name-error" message={props.errors.displayName} />
       </label>
 
-      <label style={{ display: "grid", gap: "6px" }}>
-        Workspace name (placeholder)
+      <label className="field">
+        <span className="field-label">Workspace name (placeholder)</span>
         <input
           type="text"
           value={props.data.workspaceName}
           onChange={(event) => props.onWorkspaceNameChange(event.target.value)}
           placeholder="Murmur Team"
-          style={{ borderRadius: "10px", border: "1px solid #334155", padding: "10px 12px" }}
+          aria-invalid={Boolean(props.errors.workspaceName)}
+          aria-describedby={props.errors.workspaceName ? "workspace-name-error" : undefined}
         />
-        <InlineError message={props.errors.workspaceName} />
+        <InlineError id="workspace-name-error" message={props.errors.workspaceName} />
       </label>
     </div>
   );
@@ -104,29 +106,33 @@ function WorkflowStep(props: {
   onUseCasesChange: (value: string) => void;
 }) {
   return (
-    <div style={{ display: "grid", gap: "12px" }}>
-      <label style={{ display: "grid", gap: "6px" }}>
-        Primary goal (placeholder)
+    <div className="onboarding-fields">
+      <label className="field">
+        <span className="field-label">Primary goal (placeholder)</span>
         <textarea
           value={props.data.primaryGoal}
           onChange={(event) => props.onPrimaryGoalChange(event.target.value)}
           rows={3}
           placeholder="What should Murmur help you accomplish first?"
-          style={{ borderRadius: "10px", border: "1px solid #334155", padding: "10px 12px", resize: "vertical" }}
+          className="resizable-textarea"
+          aria-invalid={Boolean(props.errors.primaryGoal)}
+          aria-describedby={props.errors.primaryGoal ? "primary-goal-error" : undefined}
         />
-        <InlineError message={props.errors.primaryGoal} />
+        <InlineError id="primary-goal-error" message={props.errors.primaryGoal} />
       </label>
 
-      <label style={{ display: "grid", gap: "6px" }}>
-        Frequent use cases (placeholder)
+      <label className="field">
+        <span className="field-label">Frequent use cases (placeholder)</span>
         <textarea
           value={props.data.useCases}
           onChange={(event) => props.onUseCasesChange(event.target.value)}
           rows={3}
           placeholder="Describe the top scenarios you expect to use."
-          style={{ borderRadius: "10px", border: "1px solid #334155", padding: "10px 12px", resize: "vertical" }}
+          className="resizable-textarea"
+          aria-invalid={Boolean(props.errors.useCases)}
+          aria-describedby={props.errors.useCases ? "use-cases-error" : undefined}
         />
-        <InlineError message={props.errors.useCases} />
+        <InlineError id="use-cases-error" message={props.errors.useCases} />
       </label>
     </div>
   );
@@ -139,29 +145,32 @@ function PreferencesStep(props: {
   onNotesChange: (value: string) => void;
 }) {
   return (
-    <div style={{ display: "grid", gap: "12px" }}>
-      <label style={{ display: "grid", gap: "6px" }}>
-        Shortcut preference (placeholder)
+    <div className="onboarding-fields">
+      <label className="field">
+        <span className="field-label">Shortcut preference (placeholder)</span>
         <input
           type="text"
           value={props.data.shortcutBehavior}
           onChange={(event) => props.onShortcutBehaviorChange(event.target.value)}
           placeholder="Open instantly with context from current app"
-          style={{ borderRadius: "10px", border: "1px solid #334155", padding: "10px 12px" }}
+          aria-invalid={Boolean(props.errors.shortcutBehavior)}
+          aria-describedby={props.errors.shortcutBehavior ? "shortcut-behavior-error" : undefined}
         />
-        <InlineError message={props.errors.shortcutBehavior} />
+        <InlineError id="shortcut-behavior-error" message={props.errors.shortcutBehavior} />
       </label>
 
-      <label style={{ display: "grid", gap: "6px" }}>
-        Additional notes (placeholder)
+      <label className="field">
+        <span className="field-label">Additional notes (placeholder)</span>
         <textarea
           value={props.data.notes}
           onChange={(event) => props.onNotesChange(event.target.value)}
           rows={4}
           placeholder="Any preferences to keep for future onboarding fields."
-          style={{ borderRadius: "10px", border: "1px solid #334155", padding: "10px 12px", resize: "vertical" }}
+          className="resizable-textarea"
+          aria-invalid={Boolean(props.errors.notes)}
+          aria-describedby={props.errors.notes ? "notes-error" : undefined}
         />
-        <InlineError message={props.errors.notes} />
+        <InlineError id="notes-error" message={props.errors.notes} />
       </label>
     </div>
   );
@@ -352,76 +361,40 @@ export function OnboardingGateScaffold({ onCompleted, initialLoadError }: Onboar
 
   if (isInitializing) {
     return (
-      <div
-        style={{
-          minHeight: "100vh",
-          display: "grid",
-          placeItems: "center",
-          background: "#020617",
-          color: "#e2e8f0",
-        }}
-      >
-        Loading onboarding...
+      <div className="screen">
+        <div className="panel status-card center-status">Loading onboarding...</div>
       </div>
     );
   }
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "grid",
-        placeItems: "center",
-        padding: "24px",
-        background: "linear-gradient(145deg, #020617 0%, #0b1120 100%)",
-        color: "#e2e8f0",
-        fontFamily: "ui-sans-serif, system-ui, -apple-system, sans-serif",
-      }}
-    >
-      <div
-        style={{
-          width: "100%",
-          maxWidth: "720px",
-          border: "1px solid #334155",
-          borderRadius: "16px",
-          padding: "24px",
-          background: "rgba(15, 23, 42, 0.9)",
-          display: "grid",
-          gap: "16px",
-        }}
-      >
-        <header style={{ display: "grid", gap: "10px" }}>
-          <p style={{ margin: 0, color: "#7dd3fc", fontSize: "13px", letterSpacing: "0.05em", textTransform: "uppercase" }}>
+    <div className="screen onboarding-screen">
+      <div className="panel onboarding-card">
+        <header className="onboarding-header">
+          <p className="eyebrow">
             Onboarding skeleton
           </p>
-          <h1 style={{ margin: 0, fontSize: "28px" }}>Set up Murmur</h1>
-          <p style={{ margin: 0, color: "#cbd5e1", lineHeight: 1.5 }}>
+          <h1 className="onboarding-title">Set up Murmur</h1>
+          <p>
             This is the Step 7 multi-step boilerplate. Field copy and final schema can evolve without replacing the flow.
           </p>
-          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+          <ol className="step-pills" aria-label="Onboarding steps">
             {STEP_META.map((step, index) => (
-              <div
+              <li
                 key={step.key}
-                style={{
-                  borderRadius: "999px",
-                  border: "1px solid #334155",
-                  background: index === currentStep ? "#0ea5e9" : "transparent",
-                  color: index === currentStep ? "#020617" : "#cbd5e1",
-                  padding: "6px 10px",
-                  fontSize: "12px",
-                  fontWeight: 700,
-                }}
+                className={`step-pill ${index === currentStep ? "step-pill-active" : ""}`}
+                aria-current={index === currentStep ? "step" : undefined}
               >
                 {index + 1}. {step.title}
-              </div>
+              </li>
             ))}
-          </div>
+          </ol>
         </header>
 
-        <section style={{ border: "1px solid #1e293b", borderRadius: "12px", padding: "16px", display: "grid", gap: "12px" }}>
+        <section className="section-card">
           <div>
-            <h2 style={{ margin: "0 0 6px", fontSize: "20px" }}>{activeStep.title}</h2>
-            <p style={{ margin: 0, color: "#94a3b8" }}>{activeStep.description}</p>
+            <h2 className="onboarding-step-title">{activeStep.title}</h2>
+            <p>{activeStep.description}</p>
           </div>
 
           {activeStep.key === "account" && (
@@ -464,23 +437,16 @@ export function OnboardingGateScaffold({ onCompleted, initialLoadError }: Onboar
           )}
         </section>
 
-        {statusMessage && <p style={{ margin: 0, color: "#7dd3fc" }}>{statusMessage}</p>}
-        {saveError && <p style={{ margin: 0, color: "#fda4af" }}>{saveError}</p>}
+        {statusMessage && <p className="alert alert-info">{statusMessage}</p>}
+        {saveError && <p className="alert alert-danger">{saveError}</p>}
 
-        <footer style={{ display: "flex", flexWrap: "wrap", gap: "10px", justifyContent: "space-between" }}>
-          <div style={{ display: "flex", gap: "10px" }}>
+        <footer className="footer-actions">
+          <div className="action-group">
             <button
               type="button"
               onClick={handleBack}
               disabled={currentStep === 0 || isSaving}
-              style={{
-                borderRadius: "10px",
-                border: "1px solid #334155",
-                padding: "10px 14px",
-                background: "transparent",
-                color: "#e2e8f0",
-                opacity: currentStep === 0 || isSaving ? 0.55 : 1,
-              }}
+              className="button button-secondary"
             >
               Back
             </button>
@@ -490,34 +456,20 @@ export function OnboardingGateScaffold({ onCompleted, initialLoadError }: Onboar
                 void handleSaveProgress();
               }}
               disabled={isSaving}
-              style={{
-                borderRadius: "10px",
-                border: "1px solid #334155",
-                padding: "10px 14px",
-                background: "transparent",
-                color: "#e2e8f0",
-                opacity: isSaving ? 0.55 : 1,
-              }}
+              className="button button-secondary"
             >
               Save progress
             </button>
           </div>
 
-          <div style={{ display: "flex", gap: "10px" }}>
+          <div className="action-group">
             <button
               type="button"
               onClick={() => {
                 void signOut();
               }}
               disabled={isSaving}
-              style={{
-                borderRadius: "10px",
-                border: "1px solid #475569",
-                background: "transparent",
-                color: "#e2e8f0",
-                padding: "10px 14px",
-                opacity: isSaving ? 0.55 : 1,
-              }}
+              className="button button-secondary"
             >
               Sign out
             </button>
@@ -529,15 +481,7 @@ export function OnboardingGateScaffold({ onCompleted, initialLoadError }: Onboar
                   void handleNext();
                 }}
                 disabled={isSaving}
-                style={{
-                  borderRadius: "10px",
-                  border: "none",
-                  padding: "10px 14px",
-                  background: "#0ea5e9",
-                  color: "#f8fafc",
-                  fontWeight: 700,
-                  opacity: isSaving ? 0.6 : 1,
-                }}
+                className="button button-primary"
               >
                 Next
               </button>
@@ -548,15 +492,7 @@ export function OnboardingGateScaffold({ onCompleted, initialLoadError }: Onboar
                   void handleComplete();
                 }}
                 disabled={isSaving}
-                style={{
-                  borderRadius: "10px",
-                  border: "none",
-                  padding: "10px 14px",
-                  background: "#22c55e",
-                  color: "#052e16",
-                  fontWeight: 700,
-                  opacity: isSaving ? 0.6 : 1,
-                }}
+                className="button button-primary"
               >
                 Complete onboarding
               </button>

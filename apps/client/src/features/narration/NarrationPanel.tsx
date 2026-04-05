@@ -10,22 +10,16 @@ export function NarrationPanel({ isPlaying }: NarrationPanelProps) {
   if (!narrationText) return null;
 
   return (
-    <div
-      style={{
-        padding: "12px 16px",
-        background: "#313244",
-        borderRadius: "8px",
-        color: "#cdd6f4",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+    <div className="panel stack-panel narration-panel">
+      <div className="narration-header">
+        <h3 className="panel-heading">Narration</h3>
         {isPlaying && (
-          <span style={{ color: "#a6e3a1", fontWeight: "bold" }}>
+          <span className="badge badge-listening">
             Speaking...
           </span>
         )}
       </div>
-      <p style={{ margin: "4px 0 0" }}>{narrationText}</p>
+      <p>{narrationText}</p>
     </div>
   );
 }

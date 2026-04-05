@@ -5,6 +5,7 @@ interface UseMicrophoneOptions {
   onAudioChunk: (base64: string) => void;
   onStop: () => void;
   onError?: (message: string) => void;
+  onAudioLevel?: (level: number) => void;
 }
 
 function getMicrophoneErrorMessage(error: unknown): string {
@@ -33,6 +34,7 @@ export function useMicrophone({
   onAudioChunk,
   onStop,
   onError,
+  onAudioLevel,
 }: UseMicrophoneOptions) {
   const [isRecording, setIsRecording] = useState(false);
   const ctxRef = useRef<AudioContext | null>(null);
@@ -40,9 +42,20 @@ export function useMicrophone({
   const processorRef = useRef<ScriptProcessorNode | null>(null);
 
   const startRecording = useCallback(async (): Promise<boolean> => {
-    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+    const desktopPermissions = window.desktop?.permissions;
+    if (desktopPermissions?.requestMicrophoneAccess) {
+      const granted = await desktopPermissions.requestMicrophoneAccess();
+      if (!granted) {
+        onError?.(
+          "Microphone access is not enabled. Allow microphone access for Murmur in system privacy settings, then try Start again."
+        );
+        return false;
+      }
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
       onError?.(
-        "Microphone is unavailable in this browser context. Use HTTPS or localhost to enable mic access."
+        "Microphone is unavailable in this runtime. Make sure microphone access is enabled for Murmur and try again."
       );
       return false;
     }
@@ -67,7 +80,11 @@ export function useMicrophone({
 
       processor.onaudioprocess = (e) => {
         const samples = e.inputBuffer.getChannelData(0);
+        const meanSquare = samples.reduce((sum, sample) => sum + sample * sample, 0) / samples.length;
+        const rms = Math.sqrt(meanSquare);
+        const normalizedLevel = Math.min(1, rms * 8);
         const base64 = float32ToPcm16Base64(samples);
+        onAudioLevel?.(normalizedLevel);
         onAudioChunk(base64);
       };
 
@@ -79,6 +96,7 @@ export function useMicrophone({
       streamRef.current = stream;
       processorRef.current = processor;
       setIsRecording(true);
+      onAudioLevel?.(0);
       return true;
     } catch (error) {
       processor?.disconnect();
@@ -87,7 +105,7 @@ export function useMicrophone({
       onError?.(getMicrophoneErrorMessage(error));
       return false;
     }
-  }, [onAudioChunk, onError]);
+  }, [onAudioChunk, onAudioLevel, onError]);
 
   const stopRecording = useCallback(() => {
     processorRef.current?.disconnect();
@@ -98,8 +116,9 @@ export function useMicrophone({
     ctxRef.current = null;
     streamRef.current = null;
     setIsRecording(false);
+    onAudioLevel?.(0);
     onStop();
-  }, [onStop]);
+  }, [onAudioLevel, onStop]);
 
   return { startRecording, stopRecording, isRecording };
 }

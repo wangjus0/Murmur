@@ -1,5 +1,5 @@
 import WebSocket from "ws";
-import { TTS_VOICE_ID, TTS_MODEL_ID, TTS_OUTPUT_FORMAT } from "@diamond/shared";
+import { TTS_VOICE_ID, TTS_MODEL_ID, TTS_OUTPUT_FORMAT } from "@murmur/shared";
 
 export class TtsAdapter {
   private apiKey: string;

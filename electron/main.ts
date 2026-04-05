@@ -1,6 +1,6 @@
 import path from "node:path";
 import fs from "node:fs";
-import { app, BrowserWindow, globalShortcut, ipcMain, shell, safeStorage } from "electron";
+import { app, BrowserWindow, globalShortcut, ipcMain, session, shell, safeStorage, systemPreferences } from "electron";
 import { readSupabasePublicConfig, type SupabasePublicConfig } from "./supabaseConfig";
 import { createMainWindow, getMainWindow } from "./windows/mainWindow";
 import { createVoicePopoverWindow } from "./windows/voicePopoverWindow";
@@ -11,10 +11,56 @@ let volatileSessionStore: SessionStoreData = {};
 let voicePopoverWindow: BrowserWindow | null = null;
 
 const GLOBAL_SHORTCUT = "CommandOrControl+Shift+Space";
+const DASHBOARD_SHORTCUT = "CommandOrControl+Shift+M";
 
 const APP_PROTOCOL = "murmur";
 const OAUTH_CALLBACK_EVENT = "auth:oauth-callback";
 const AUTH_STORE_FILENAME = "auth-session-store.bin";
+const TRUSTED_RENDERER_ORIGINS = new Set(["http://localhost:5173"]);
+
+function isTrustedRendererUrl(rawUrl: string): boolean {
+  if (!rawUrl) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol === "file:") {
+      return true;
+    }
+
+    return TRUSTED_RENDERER_ORIGINS.has(parsed.origin);
+  } catch {
+    return false;
+  }
+}
+
+function isMicrophonePermission(permission: string): boolean {
+  return permission === "audioCapture" || permission === "microphone" || permission === "media";
+}
+
+function registerMediaPermissionHandlers(): void {
+  const defaultSession = session.defaultSession;
+
+  defaultSession.setPermissionCheckHandler((_wc, permission, requestingOrigin, details) => {
+    if (!isMicrophonePermission(permission)) {
+      return false;
+    }
+
+    const requestUrl = details?.requestingUrl ?? requestingOrigin;
+    return isTrustedRendererUrl(requestUrl);
+  });
+
+  defaultSession.setPermissionRequestHandler((_wc, permission, callback, details) => {
+    if (!isMicrophonePermission(permission)) {
+      callback(false);
+      return;
+    }
+
+    const requestUrl = details?.requestingUrl ?? "";
+    callback(isTrustedRendererUrl(requestUrl));
+  });
+}
 
 type SessionStoreData = Readonly<Record<string, string>>;
 
@@ -180,6 +226,29 @@ function registerAuthIpcHandlers(config: SupabasePublicConfig): void {
     pendingOAuthCallbackUrl = null;
     return callbackUrl;
   });
+
+  ipcMain.handle("permissions:request-microphone-access", async () => {
+    if (typeof systemPreferences.askForMediaAccess !== "function") {
+      return true;
+    }
+
+    try {
+      return await systemPreferences.askForMediaAccess("microphone");
+    } catch {
+      return false;
+    }
+  });
+
+  ipcMain.handle("permissions:open-microphone-settings", async () => {
+    if (process.platform === "darwin") {
+      await shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone");
+      return;
+    }
+
+    if (process.platform === "win32") {
+      await shell.openExternal("ms-settings:privacy-microphone");
+    }
+  });
 }
 
 function registerProtocolHandlers(): void {
@@ -207,6 +276,9 @@ function getOrCreateVoicePopover(): BrowserWindow {
   }
 
   voicePopoverWindow = createVoicePopoverWindow();
+  voicePopoverWindow.on("blur", () => {
+    hideVoicePopover();
+  });
   voicePopoverWindow.on("closed", () => {
     voicePopoverWindow = null;
   });
@@ -223,6 +295,24 @@ function toggleVoicePopover(): void {
     win.show();
     win.focus();
   }
+}
+
+function toggleMainWindow(): void {
+  const existingWindow = getMainWindow();
+  if (existingWindow) {
+    if (existingWindow.isVisible()) {
+      existingWindow.hide();
+      return;
+    }
+
+    existingWindow.show();
+    existingWindow.focus();
+    return;
+  }
+
+  const win = createMainWindow();
+  win.show();
+  win.focus();
 }
 
 function hideVoicePopover(): void {
@@ -263,9 +353,11 @@ async function bootstrap(): Promise<void> {
 
   registerAuthIpcHandlers(supabaseConfig);
   registerShortcutIpcHandlers();
+  registerMediaPermissionHandlers();
   createMainWindow();
 
   globalShortcut.register(GLOBAL_SHORTCUT, toggleVoicePopover);
+  globalShortcut.register(DASHBOARD_SHORTCUT, toggleMainWindow);
 
   app.on("activate", () => {
     if (appReady && app.isReady() && process.platform === "darwin") {
@@ -279,10 +371,7 @@ app.on("will-quit", () => {
 });
 
 app.on("window-all-closed", async () => {
-  if (process.platform !== "darwin") {
-    await wait(1);
-    app.quit();
-  }
+  await wait(1);
 });
 
 void bootstrap();

@@ -4,7 +4,7 @@ import {
   type MessageEnvelope,
   type ServerToClientEventName,
   type ServerToClientPayloadMap,
-} from '@diamond/shared'
+} from '@murmur/shared'
 import type { ZodIssue } from 'zod'
 
 export type RawSocketMessage = string | Buffer | ArrayBuffer | Buffer[]

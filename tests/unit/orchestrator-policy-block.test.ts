@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import type { GoogleGenAI } from "@google/genai";
-import type { ServerEvent } from "@diamond/shared";
+import type { ServerEvent } from "@murmur/shared";
 import { handleTranscriptFinal } from "../../apps/server/src/orchestrator/orchestrator.ts";
 
 class FakeSession {

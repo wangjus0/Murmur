@@ -1,5 +1,5 @@
 import type { GoogleGenAI } from "@google/genai";
-import type { IntentResult, ServerEvent } from "@diamond/shared";
+import type { IntentResult, ServerEvent } from "@murmur/shared";
 import { env } from "../config/env.js";
 import { BrowserAdapter } from "../tools/browser/adapter.js";
 import { narrate } from "../voice/narrator.js";

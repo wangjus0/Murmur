@@ -85,16 +85,8 @@ export function AppShell() {
 
   if (isLoading || (user && onboardingStatus.isLoading)) {
     return (
-      <div
-        style={{
-          minHeight: "100vh",
-          display: "grid",
-          placeItems: "center",
-          background: "#020617",
-          color: "#e2e8f0",
-        }}
-      >
-        Checking session...
+      <div className="screen">
+        <div className="panel status-card center-status">Checking session...</div>
       </div>
     );
   }

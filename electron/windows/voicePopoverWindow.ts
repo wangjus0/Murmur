@@ -12,13 +12,18 @@ function resolveRendererHtmlPath(): string {
 }
 
 export function createVoicePopoverWindow(): BrowserWindow {
+  const windowWidth = 430;
+  const windowHeight = 86;
+  const edgeOffset = 24;
+
   const win = new BrowserWindow({
-    width: 420,
-    height: 96,
+    width: windowWidth,
+    height: windowHeight,
     show: false,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
+    fullscreenable: false,
     skipTaskbar: true,
     autoHideMenuBar: true,
     resizable: false,
@@ -34,9 +39,14 @@ export function createVoicePopoverWindow(): BrowserWindow {
   });
 
   const primaryDisplay = screen.getPrimaryDisplay();
-  const { width: screenWidth } = primaryDisplay.workAreaSize;
-  const winWidth = 420;
-  win.setPosition(Math.round((screenWidth - winWidth) / 2), 48);
+  const { x: workAreaX, y: workAreaY, width: workAreaWidth, height: workAreaHeight } = primaryDisplay.workArea;
+  const centeredX = Math.round(workAreaX + (workAreaWidth - windowWidth) / 2);
+  const bottomY = Math.round(workAreaY + workAreaHeight - windowHeight - edgeOffset);
+  win.setPosition(centeredX, bottomY);
+  win.setAlwaysOnTop(true, "screen-saver");
+  win.setVisibleOnAllWorkspaces(true, {
+    visibleOnFullScreen: true,
+  });
 
   const rendererUrl = process.env.ELECTRON_RENDERER_URL;
   const isDev = !app.isPackaged;

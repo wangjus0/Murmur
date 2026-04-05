@@ -1,4 +1,4 @@
-import type { ServerEvent } from "@diamond/shared";
+import type { ServerEvent } from "@murmur/shared";
 import { TtsAdapter } from "./tts.js";
 
 interface Sendable {

@@ -1,6 +1,6 @@
 import type { GoogleGenAI } from "@google/genai";
-import type { ClientEvent, ServerEvent } from "@diamond/shared";
-import { parseClientEvent } from "@diamond/shared";
+import type { ClientEvent, ServerEvent } from "@murmur/shared";
+import { parseClientEvent } from "@murmur/shared";
 import crypto from "node:crypto";
 import type { RawData, WebSocket } from "ws";
 import { env } from "../config/env.js";

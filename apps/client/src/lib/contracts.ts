@@ -1,5 +1,5 @@
-import type { ServerToClientMessage } from '@diamond/shared'
-import { serverToClientMessageSchema } from '@diamond/shared'
+import type { ServerToClientMessage } from '@murmur/shared'
+import { serverToClientMessageSchema } from '@murmur/shared'
 
 type ParseServerMessageResult =
   | { readonly ok: true; readonly message: ServerToClientMessage }

@@ -28,12 +28,12 @@ test("classifyIntent returns search result when confidence is high", async () =>
     })
   );
 
-  const result = await classifyIntent(ai, "search for DiamondHacks winners");
+  const result = await classifyIntent(ai, "search for Murmur winners");
 
   assert.deepEqual(result, {
     intent: "search",
     confidence: 0.91,
-    query: "search for DiamondHacks winners",
+    query: "search for Murmur winners",
   });
 });
 

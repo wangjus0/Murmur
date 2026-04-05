@@ -15,6 +15,18 @@ function titleForMode(mode: AuthMode): string {
   return "Sign in";
 }
 
+function descriptionForMode(mode: AuthMode): string {
+  if (mode === "sign-up") {
+    return "Create your workspace and unlock hands-free browser workflows.";
+  }
+
+  if (mode === "reset") {
+    return "We will send a secure reset link to your email address.";
+  }
+
+  return "Welcome back. Continue your current voice session securely.";
+}
+
 export function AuthScreen() {
   const { signInWithPassword, signUpWithPassword, sendPasswordReset, signInWithGoogle, authError } = useAuth();
   const [mode, setMode] = useState<AuthMode>("sign-in");
@@ -48,7 +60,7 @@ export function AuthScreen() {
     try {
       if (mode === "sign-up") {
         await signUpWithPassword(email, password);
-        setStatusMessage("Sign-up submitted. Check email verification if prompted.");
+        setStatusMessage("Check your inbox for a verification email.");
         return;
       }
 
@@ -59,112 +71,99 @@ export function AuthScreen() {
       }
 
       await signInWithPassword(email, password);
+    } catch {
+      // AuthProvider already stores the visible authError message.
     } finally {
       setIsSubmitting(false);
     }
   };
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "grid",
-        placeItems: "center",
-        background: "linear-gradient(145deg, #0f172a 0%, #020617 100%)",
-        color: "#e2e8f0",
-        padding: "24px",
-        fontFamily: "ui-sans-serif, system-ui, -apple-system, sans-serif",
-      }}
-    >
-      <form
-        onSubmit={handleSubmit}
-        style={{
-          width: "100%",
-          maxWidth: "420px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "12px",
-          background: "rgba(15, 23, 42, 0.88)",
-          border: "1px solid rgba(148, 163, 184, 0.35)",
-          borderRadius: "16px",
-          padding: "20px",
-        }}
-      >
-        <h1 style={{ margin: 0, fontSize: "24px" }}>{titleForMode(mode)}</h1>
-        <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-          Email
-          <input
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            autoComplete="email"
-            required
-            style={{ borderRadius: "10px", border: "1px solid #334155", padding: "10px 12px" }}
-          />
-        </label>
-        {mode !== "reset" && (
-          <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-            Password
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              autoComplete={mode === "sign-up" ? "new-password" : "current-password"}
-              minLength={8}
-              required
-              style={{ borderRadius: "10px", border: "1px solid #334155", padding: "10px 12px" }}
-            />
+    <div className="screen auth-screen">
+      <div className="panel auth-shell">
+        <aside className="auth-aside">
+          <p className="eyebrow">Murmur Desktop</p>
+          <h1 className="auth-brand-title">A focused workspace for voice-guided browser automation</h1>
+          <p className="auth-brand-copy">
+            Run hands-free workflows with clear state visibility, secure auth, and predictable controls designed for daily use.
+          </p>
+          <div className="auth-points">
+            <div className="auth-point">Live transcript and timeline visibility.</div>
+            <div className="auth-point">Interrupt and resume controls during execution.</div>
+            <div className="auth-point">Guided onboarding with saved progress.</div>
+          </div>
+        </aside>
+
+        <form onSubmit={handleSubmit} className="auth-card">
+          <div className="auth-form-header">
+            <p className="eyebrow">Authentication</p>
+            <h2>{titleForMode(mode)}</h2>
+            <p>{descriptionForMode(mode)}</p>
+          </div>
+
+          <label className="field">
+            <span className="field-label">Email</span>
+            <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required />
           </label>
-        )}
+          {mode !== "reset" && (
+            <label className="field">
+              <span className="field-label">Password</span>
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoComplete={mode === "sign-up" ? "new-password" : "current-password"}
+                minLength={8}
+                required
+              />
+            </label>
+          )}
 
-        <button
-          type="submit"
-          disabled={!canSubmit || isSubmitting}
-          style={{
-            borderRadius: "10px",
-            border: "none",
-            padding: "12px",
-            background: "#0ea5e9",
-            color: "#f8fafc",
-            fontWeight: 700,
-            opacity: !canSubmit || isSubmitting ? 0.6 : 1,
-          }}
-        >
-          {isSubmitting ? "Working..." : submitButtonLabel}
-        </button>
-
-        <button
-          type="button"
-          onClick={() => {
-            void signInWithGoogle();
-          }}
-          style={{
-            borderRadius: "10px",
-            border: "1px solid #334155",
-            padding: "12px",
-            background: "transparent",
-            color: "#f8fafc",
-            fontWeight: 600,
-          }}
-        >
-          Continue with Google
-        </button>
-
-        {statusMessage && <p style={{ margin: 0, color: "#7dd3fc", fontSize: "14px" }}>{statusMessage}</p>}
-        {authError && <p style={{ margin: 0, color: "#fda4af", fontSize: "14px" }}>{authError}</p>}
-
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "4px" }}>
-          <button type="button" onClick={() => setMode("sign-in")} style={{ background: "none", border: "none", color: "#cbd5e1" }}>
-            Sign in
+          <button type="submit" disabled={!canSubmit || isSubmitting} className="button button-primary">
+            {isSubmitting ? "Working..." : submitButtonLabel}
           </button>
-          <button type="button" onClick={() => setMode("sign-up")} style={{ background: "none", border: "none", color: "#cbd5e1" }}>
-            Sign up
+
+          <button
+            type="button"
+            onClick={() => {
+              void signInWithGoogle();
+            }}
+            className="button button-secondary"
+          >
+            Continue with Google
           </button>
-          <button type="button" onClick={() => setMode("reset")} style={{ background: "none", border: "none", color: "#cbd5e1" }}>
-            Forgot password
-          </button>
-        </div>
-      </form>
+
+          {statusMessage && <p className="alert alert-info">{statusMessage}</p>}
+          {authError && <p className="alert alert-danger">{authError}</p>}
+
+          <div className="mode-switch">
+            <button
+              type="button"
+              onClick={() => setMode("sign-in")}
+              aria-pressed={mode === "sign-in"}
+              className={`chip-button ${mode === "sign-in" ? "chip-active" : ""}`}
+            >
+              Sign in
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("sign-up")}
+              aria-pressed={mode === "sign-up"}
+              className={`chip-button ${mode === "sign-up" ? "chip-active" : ""}`}
+            >
+              Sign up
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("reset")}
+              aria-pressed={mode === "reset"}
+              className={`chip-button ${mode === "reset" ? "chip-active" : ""}`}
+            >
+              Forgot password
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

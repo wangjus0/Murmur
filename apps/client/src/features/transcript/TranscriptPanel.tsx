@@ -7,33 +7,26 @@ export function TranscriptPanel() {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const prefersReducedMotion =
+      typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    bottomRef.current?.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth" });
   }, [transcriptFinals, transcriptPartial]);
 
   return (
-    <div
-      style={{
-        flex: 1,
-        overflowY: "auto",
-        padding: "16px",
-        background: "#1e1e2e",
-        borderRadius: "8px",
-        minHeight: "200px",
-      }}
-    >
-      <h3 style={{ margin: "0 0 12px", color: "#cdd6f4" }}>Transcript</h3>
+    <div className="panel stack-panel scroll-panel transcript-panel">
+      <h3 className="panel-heading">Transcript</h3>
       {transcriptFinals.map((text, i) => (
-        <p key={i} style={{ color: "#cdd6f4", margin: "4px 0" }}>
+        <p key={i}>
           {text}
         </p>
       ))}
       {transcriptPartial && (
-        <p style={{ color: "#6c7086", fontStyle: "italic", margin: "4px 0" }}>
+        <p className="transcript-partial">
           {transcriptPartial}
         </p>
       )}
       {transcriptFinals.length === 0 && !transcriptPartial && (
-        <p style={{ color: "#6c7086" }}>
+        <p className="transcript-empty">
           Click Start and speak to begin...
         </p>
       )}

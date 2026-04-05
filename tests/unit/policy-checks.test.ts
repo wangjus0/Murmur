@@ -11,7 +11,7 @@ test("allows navigation for allowlisted domains", () => {
   const decision = evaluatePolicyAction(
     {
       kind: "navigate",
-      targetUrl: "https://www.google.com/search?q=diamondhacks",
+      targetUrl: "https://www.google.com/search?q=murmur",
     },
     createPolicyConfig("google.com,example.com")
   );

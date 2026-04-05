@@ -1,4 +1,4 @@
-# DiamondHacks 2026 Project Details
+# Murmur Project Details
 
 This document is organized into independent work sets so multiple agents can build in parallel with minimal overlap.
 

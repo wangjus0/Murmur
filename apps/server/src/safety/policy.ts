@@ -1,4 +1,4 @@
-import type { IntentResult } from "@diamond/shared";
+import type { IntentResult } from "@murmur/shared";
 
 export type PolicyBlockReason =
   | "domain_not_allowlisted"

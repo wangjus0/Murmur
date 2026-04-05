@@ -1,9 +1,19 @@
 export type OAuthCallbackResult =
   | { type: "success"; code: string }
-  | { type: "recovery"; tokenHash: string }
+  | { type: "otp"; tokenHash: string; otpType: SupportedOtpType }
   | { type: "session"; accessToken: string; refreshToken: string }
   | { type: "error"; message: string }
   | { type: "ignored" };
+
+export type SupportedOtpType = "signup" | "recovery" | "invite" | "magiclink" | "email_change";
+
+const SUPPORTED_OTP_TYPES: ReadonlySet<SupportedOtpType> = new Set([
+  "signup",
+  "recovery",
+  "invite",
+  "magiclink",
+  "email_change",
+]);
 
 export function parseOAuthCallback(callbackUrl: string): OAuthCallbackResult {
   let parsed: URL;
@@ -30,12 +40,13 @@ export function parseOAuthCallback(callbackUrl: string): OAuthCallbackResult {
     };
   }
 
-  const recoveryType = parsed.searchParams.get("type");
-  const recoveryTokenHash = parsed.searchParams.get("token_hash");
-  if (recoveryType === "recovery" && recoveryTokenHash) {
+  const otpType = parsed.searchParams.get("type");
+  const otpTokenHash = parsed.searchParams.get("token_hash");
+  if (otpType && otpTokenHash && SUPPORTED_OTP_TYPES.has(otpType as SupportedOtpType)) {
     return {
-      type: "recovery",
-      tokenHash: recoveryTokenHash,
+      type: "otp",
+      tokenHash: otpTokenHash,
+      otpType: otpType as SupportedOtpType,
     };
   }
 

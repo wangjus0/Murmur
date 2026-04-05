@@ -17,9 +17,14 @@ test("parseOAuthCallback returns error for callback failures", () => {
   assert.deepEqual(result, { type: "error", message: "access_denied" });
 });
 
-test("parseOAuthCallback returns recovery token hash for password recovery", () => {
+test("parseOAuthCallback returns OTP token hash for password recovery", () => {
   const result = parseOAuthCallback("murmur://auth/callback?type=recovery&token_hash=tok_123");
-  assert.deepEqual(result, { type: "recovery", tokenHash: "tok_123" });
+  assert.deepEqual(result, { type: "otp", tokenHash: "tok_123", otpType: "recovery" });
+});
+
+test("parseOAuthCallback returns OTP token hash for signup verification", () => {
+  const result = parseOAuthCallback("murmur://auth/callback?type=signup&token_hash=tok_signup");
+  assert.deepEqual(result, { type: "otp", tokenHash: "tok_signup", otpType: "signup" });
 });
 
 test("parseOAuthCallback returns session tokens from hash payload", () => {

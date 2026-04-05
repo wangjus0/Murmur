@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { TurnState, IntentResult } from "@diamond/shared";
+import type { TurnState, IntentResult } from "@murmur/shared";
 
 export type ActionTimelineKind =
   | "session"

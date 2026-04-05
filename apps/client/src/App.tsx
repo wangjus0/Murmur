@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useSession } from "./hooks/useSession";
 import { useAudioPlayer } from "./features/narration/useAudioPlayer";
 import { StateBadge } from "./features/voice/StateBadge";
@@ -5,12 +6,15 @@ import { TranscriptPanel } from "./features/transcript/TranscriptPanel";
 import { NarrationPanel } from "./features/narration/NarrationPanel";
 import { MicButton } from "./features/voice/MicButton";
 import { ActionTimeline } from "./features/browser/ActionTimeline";
+import { useAuth } from "./features/auth/AuthProvider";
 import { useSessionStore } from "./store/session";
 
 export function App() {
+  const { signOut, authError, clearAuthError } = useAuth();
   const audioPlayer = useAudioPlayer();
   const { sendStartSession, sendAudioChunk, sendAudioEnd, sendInterrupt } =
     useSession(audioPlayer);
+  const [isSigningOut, setIsSigningOut] = useState(false);
 
   const turnState = useSessionStore((s) => s.turnState);
   const intent = useSessionStore((s) => s.intent);
@@ -22,138 +26,118 @@ export function App() {
     turnState === "thinking" || turnState === "acting" || turnState === "speaking";
   const canInterrupt = turnState === "acting" || turnState === "speaking";
 
+  const handleSignOut = async () => {
+    clearAuthError();
+    setIsSigningOut(true);
+    try {
+      await signOut();
+    } finally {
+      setIsSigningOut(false);
+    }
+  };
+
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "#11111b",
-        color: "#cdd6f4",
-        fontFamily: "system-ui, sans-serif",
-        display: "flex",
-        justifyContent: "center",
-        padding: "24px",
-      }}
-    >
-      <div
-        style={{
-          width: "100%",
-          maxWidth: "640px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "16px",
-        }}
-      >
-        {/* Header */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
-          <h1 style={{ margin: 0, fontSize: "24px" }}>Diamond Voice Agent</h1>
-          <StateBadge />
-        </div>
+    <div className="screen app-screen">
+      <div className="app-frame">
+        <aside className="app-rail" aria-label="Primary navigation">
+          <div className="rail-logo">M</div>
+          <button className="rail-item rail-item-active" aria-label="Home" type="button" />
+          <button className="rail-item" aria-label="Timeline" type="button" />
+          <button className="rail-item" aria-label="Actions" type="button" />
+          <button className="rail-item" aria-label="Settings" type="button" />
+        </aside>
 
-        {/* Transcript */}
-        <TranscriptPanel />
+        <div className="app-workspace">
+          <header className="app-topbar">
+            <div className="app-titlebar-label">Murmur</div>
 
-        {/* Action Timeline */}
-        <ActionTimeline />
+            <div className="search-wrap" role="search">
+              <span className="search-icon" aria-hidden="true">◦</span>
+              <input
+                className="search-input"
+                type="search"
+                placeholder="Search commands, intents, or sessions"
+                aria-label="Search"
+              />
+            </div>
 
-        {/* Intent */}
-        {intent && (
-          <div
-            style={{
-              padding: "8px 16px",
-              background: "#313244",
-              borderRadius: "8px",
-              fontSize: "14px",
-            }}
-          >
-            Intent: <strong>{intent.intent}</strong> (confidence:{" "}
-            {(intent.confidence * 100).toFixed(0)}%)
-          </div>
-        )}
-
-        {/* Action Status Feed */}
-        {actionStatuses.length > 0 && (
-          <div
-            style={{
-              padding: "12px 16px",
-              background: "#1e1e2e",
-              borderRadius: "8px",
-              borderLeft: "3px solid #89b4fa",
-            }}
-          >
-            <h4 style={{ margin: "0 0 8px", color: "#89b4fa", fontSize: "14px" }}>
-              Browser Actions
-            </h4>
-            {actionStatuses.map((msg, i) => (
-              <div
-                key={i}
-                style={{
-                  fontSize: "13px",
-                  color: "#a6adc8",
-                  padding: "2px 0",
+            <div className="topbar-actions">
+              <StateBadge />
+              <button
+                type="button"
+                onClick={() => {
+                  void handleSignOut();
                 }}
+                disabled={isSigningOut}
+                className="button button-secondary"
               >
-                {msg}
+                {isSigningOut ? "Signing out..." : "Sign out"}
+              </button>
+            </div>
+          </header>
+
+          <div className="app-dashboard">
+            <section className="panel stack-panel hero-card">
+              <p className="eyebrow">Voice Operations Console</p>
+              <h1 className="app-title">Murmur Voice Agent</h1>
+              <p className="subtitle">
+                Speak naturally and the assistant transcribes, reasons, and executes browser actions in real time.
+              </p>
+
+              {intent && (
+                <div className="alert alert-info">
+                  Intent: <strong>{intent.intent}</strong> (confidence: {(intent.confidence * 100).toFixed(0)}%)
+                </div>
+              )}
+
+              {authError && <div className="alert alert-danger">{authError}</div>}
+              {error && <div className="alert alert-danger">{error}</div>}
+
+              <div className="control-row">
+                <MicButton
+                  onAudioChunk={sendAudioChunk}
+                  onStartSession={sendStartSession}
+                  onStop={sendAudioEnd}
+                  onError={setError}
+                  disabled={micDisabled}
+                />
+                <button onClick={sendInterrupt} disabled={!canInterrupt} className="button button-danger">
+                  Interrupt
+                </button>
               </div>
-            ))}
+            </section>
+
+            <TranscriptPanel />
+            <ActionTimeline />
+
+            {actionStatuses.length > 0 && (
+              <div className="panel stack-panel actions-panel">
+                <h4 className="panel-heading">Browser Actions</h4>
+                <div className="event-list">
+                  {actionStatuses.map((msg, i) => (
+                    <div key={i} className="event-item">{msg}</div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <NarrationPanel isPlaying={audioPlayer.isPlaying} />
+
+            <section className="panel stack-panel utility-card">
+              <h4 className="panel-heading">Session Status</h4>
+              <p className="status-note">Realtime assistant session</p>
+              <div className="utility-grid">
+                <div className="utility-metric">
+                  <span className="utility-label">Turn State</span>
+                  <strong className="utility-value">{turnState}</strong>
+                </div>
+                <div className="utility-metric">
+                  <span className="utility-label">Queued Actions</span>
+                  <strong className="utility-value">{actionStatuses.length}</strong>
+                </div>
+              </div>
+            </section>
           </div>
-        )}
-
-        {/* Narration */}
-        <NarrationPanel isPlaying={audioPlayer.isPlaying} />
-
-        {/* Error */}
-        {error && (
-          <div
-            style={{
-              padding: "8px 16px",
-              background: "#45243e",
-              borderRadius: "8px",
-              color: "#f38ba8",
-            }}
-          >
-            {error}
-          </div>
-        )}
-
-        {/* Controls */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "center",
-            gap: "12px",
-            padding: "16px 0",
-          }}
-        >
-          <MicButton
-            onAudioChunk={sendAudioChunk}
-            onStartSession={sendStartSession}
-            onStop={sendAudioEnd}
-            onError={setError}
-            disabled={micDisabled}
-          />
-          <button
-            onClick={sendInterrupt}
-            disabled={!canInterrupt}
-            style={{
-              padding: "16px 32px",
-              fontSize: "18px",
-              fontWeight: "bold",
-              border: "2px solid #f38ba8",
-              borderRadius: "50px",
-              cursor: canInterrupt ? "pointer" : "not-allowed",
-              color: "#f38ba8",
-              background: "transparent",
-              opacity: canInterrupt ? 1 : 0.5,
-            }}
-          >
-            Interrupt
-          </button>
         </div>
       </div>
     </div>

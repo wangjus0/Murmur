@@ -1,6 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { z } from "zod";
-import type { IntentResult } from "@diamond/shared";
+import type { IntentResult } from "@murmur/shared";
 
 const intentResultSchema = z.object({
   intent: z.enum(["search", "form_fill_draft", "clarify"]),

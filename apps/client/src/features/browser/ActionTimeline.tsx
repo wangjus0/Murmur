@@ -11,14 +11,14 @@ const KIND_LABELS = {
   error: "Error",
 } as const;
 
-const KIND_COLORS = {
-  session: "#a6adc8",
-  state: "#89b4fa",
-  action: "#94e2d5",
-  intent: "#f9e2af",
-  narration: "#cba6f7",
-  done: "#a6e3a1",
-  error: "#f38ba8",
+const KIND_CLASSNAMES = {
+  session: "timeline-session",
+  state: "timeline-state",
+  action: "timeline-action",
+  intent: "timeline-intent",
+  narration: "timeline-narration",
+  done: "timeline-done",
+  error: "timeline-error",
 } as const;
 
 export function ActionTimeline() {
@@ -26,53 +26,30 @@ export function ActionTimeline() {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const prefersReducedMotion =
+      typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    bottomRef.current?.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth" });
   }, [actionTimeline]);
 
   return (
-    <div
-      style={{
-        overflowY: "auto",
-        padding: "16px",
-        background: "#1e1e2e",
-        borderRadius: "8px",
-        minHeight: "180px",
-      }}
-    >
-      <h3 style={{ margin: "0 0 12px", color: "#cdd6f4" }}>Action Timeline</h3>
+    <div className="panel stack-panel scroll-panel timeline-panel">
+      <h3 className="panel-heading">Action Timeline</h3>
 
       {actionTimeline.length === 0 && (
-        <p style={{ color: "#6c7086", margin: 0 }}>Waiting for session activity...</p>
+        <p className="timeline-empty">Waiting for session activity...</p>
       )}
 
       {actionTimeline.map((item) => (
-        <div
-          key={item.id}
-          style={{
-            padding: "8px 0",
-            borderBottom: "1px solid #313244",
-            display: "flex",
-            flexDirection: "column",
-            gap: "2px",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <span
-              style={{
-                fontSize: "11px",
-                fontWeight: 700,
-                letterSpacing: "0.04em",
-                textTransform: "uppercase",
-                color: KIND_COLORS[item.kind],
-              }}
-            >
+        <div key={item.id} className="timeline-item">
+          <div className="timeline-meta">
+            <span className={`timeline-kind ${KIND_CLASSNAMES[item.kind]}`}>
               {KIND_LABELS[item.kind]}
             </span>
-            <span style={{ color: "#7f849c", fontSize: "12px" }}>
+            <span className="timeline-time">
               {new Date(item.createdAt).toLocaleTimeString()}
             </span>
           </div>
-          <p style={{ margin: 0, color: "#cdd6f4", fontSize: "14px" }}>{item.message}</p>
+          <p>{item.message}</p>
         </div>
       ))}
       <div ref={bottomRef} />

@@ -1,5 +1,5 @@
 {
-  "name": "@diamond/server",
+  "name": "@murmur/server",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -7,7 +7,7 @@
     "dev": "tsx watch src/index.ts"
   },
   "dependencies": {
-    "@diamond/shared": "*",
+    "@murmur/shared": "*",
     "express": "^5.1.0",
     "ws": "^8.18.0",
     "zod": "^3.24.0",

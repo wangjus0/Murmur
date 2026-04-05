@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { GoogleGenAI } from "@google/genai";
-import type { ServerEvent } from "@diamond/shared";
+import type { ServerEvent } from "@murmur/shared";
 
 import { handleTranscriptFinal } from "../../apps/server/src/orchestrator/orchestrator.ts";
 
@@ -33,12 +33,12 @@ test("final transcript flows through intent, browser action, narration, and done
     session,
     {} as GoogleGenAI,
     "elevenlabs-test-key",
-    "search for DiamondHacks demo projects",
+    "search for Murmur demo projects",
     {
       classifyIntent: async () => ({
         intent: "search",
         confidence: 0.95,
-        query: "search for DiamondHacks demo projects",
+        query: "search for Murmur demo projects",
       }),
       createBrowserAdapter: () => ({
         runSearch: async (query, callbacks) => {
@@ -59,7 +59,7 @@ test("final transcript flows through intent, browser action, narration, and done
   );
 
   assert.deepEqual(session.states, ["thinking", "acting", "speaking", "idle"]);
-  assert.deepEqual(browserCalls, ["search for DiamondHacks demo projects"]);
+  assert.deepEqual(browserCalls, ["search for Murmur demo projects"]);
   assert.deepEqual(narratedTexts, ["Top result: Demo Project"]);
   assert.equal(session.browserAdapter, null);
 
