@@ -10,6 +10,10 @@ type DesktopSupabaseConfig = {
   anonKey: string;
 };
 
+type DesktopShortcutApi = {
+  closePopover: () => Promise<void>;
+};
+
 type DesktopAuthApi = {
   startGoogleOAuth: (authUrl: string) => Promise<void>;
   getSessionItem: (key: string) => Promise<string | null>;
@@ -23,6 +27,7 @@ type DesktopApi = {
   ping: () => string;
   getRuntimeInfo: () => DesktopRuntimeInfo;
   getSupabaseConfig: () => DesktopSupabaseConfig;
+  shortcut?: DesktopShortcutApi;
   auth?: DesktopAuthApi;
 };
 

@@ -1,12 +1,16 @@
 import path from "node:path";
 import fs from "node:fs";
-import { app, ipcMain, shell, safeStorage } from "electron";
+import { app, BrowserWindow, globalShortcut, ipcMain, shell, safeStorage } from "electron";
 import { readSupabasePublicConfig, type SupabasePublicConfig } from "./supabaseConfig";
 import { createMainWindow, getMainWindow } from "./windows/mainWindow";
+import { createVoicePopoverWindow } from "./windows/voicePopoverWindow";
 
 let appReady = false;
 let pendingOAuthCallbackUrl: string | null = null;
 let volatileSessionStore: SessionStoreData = {};
+let voicePopoverWindow: BrowserWindow | null = null;
+
+const GLOBAL_SHORTCUT = "CommandOrControl+Shift+Space";
 
 const APP_PROTOCOL = "murmur";
 const OAUTH_CALLBACK_EVENT = "auth:oauth-callback";
@@ -197,6 +201,42 @@ function registerProtocolHandlers(): void {
   });
 }
 
+function getOrCreateVoicePopover(): BrowserWindow {
+  if (voicePopoverWindow && !voicePopoverWindow.isDestroyed()) {
+    return voicePopoverWindow;
+  }
+
+  voicePopoverWindow = createVoicePopoverWindow();
+  voicePopoverWindow.on("closed", () => {
+    voicePopoverWindow = null;
+  });
+
+  return voicePopoverWindow;
+}
+
+function toggleVoicePopover(): void {
+  const win = getOrCreateVoicePopover();
+
+  if (win.isVisible()) {
+    win.hide();
+  } else {
+    win.show();
+    win.focus();
+  }
+}
+
+function hideVoicePopover(): void {
+  if (voicePopoverWindow && !voicePopoverWindow.isDestroyed() && voicePopoverWindow.isVisible()) {
+    voicePopoverWindow.hide();
+  }
+}
+
+function registerShortcutIpcHandlers(): void {
+  ipcMain.handle("shortcut:close-popover", () => {
+    hideVoicePopover();
+  });
+}
+
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
@@ -222,7 +262,10 @@ async function bootstrap(): Promise<void> {
   app.setAsDefaultProtocolClient(APP_PROTOCOL);
 
   registerAuthIpcHandlers(supabaseConfig);
+  registerShortcutIpcHandlers();
   createMainWindow();
+
+  globalShortcut.register(GLOBAL_SHORTCUT, toggleVoicePopover);
 
   app.on("activate", () => {
     if (appReady && app.isReady() && process.platform === "darwin") {
@@ -230,6 +273,10 @@ async function bootstrap(): Promise<void> {
     }
   });
 }
+
+app.on("will-quit", () => {
+  globalShortcut.unregisterAll();
+});
 
 app.on("window-all-closed", async () => {
   if (process.platform !== "darwin") {

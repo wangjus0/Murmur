@@ -12,6 +12,9 @@ const desktopApi = Object.freeze({
     node: process.versions.node,
   }),
   getSupabaseConfig: () => Object.freeze(readSupabasePublicConfig()),
+  shortcut: {
+    closePopover: () => ipcRenderer.invoke("shortcut:close-popover"),
+  },
   auth: {
     startGoogleOAuth: (authUrl: string) => ipcRenderer.invoke("auth:start-google-oauth", authUrl),
     getSessionItem: (key: string) => ipcRenderer.invoke("auth:get-session-item", key),
