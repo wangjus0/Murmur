@@ -33,6 +33,7 @@ type DesktopApi = {
   ping: () => string;
   getRuntimeInfo: () => DesktopRuntimeInfo;
   getSupabaseConfig: () => DesktopSupabaseConfig;
+  getRealtimeWebSocketUrl?: () => string;
   shortcut?: DesktopShortcutApi;
   auth?: DesktopAuthApi;
   permissions?: DesktopPermissionsApi;

@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback } from "react";
 import { createSocket, type Socket } from "../lib/ws";
 import { useSessionStore } from "../store/session";
 import type { useAudioPlayer } from "../features/narration/useAudioPlayer";
+import { resolveSessionSocketUrl } from "./sessionSocketUrl";
 
 export function useSession(
   audioPlayer: ReturnType<typeof useAudioPlayer>
@@ -10,8 +11,10 @@ export function useSession(
   const store = useSessionStore;
 
   useEffect(() => {
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const url = `${protocol}//${window.location.host}/ws`;
+    const url = resolveSessionSocketUrl({
+      locationLike: window.location,
+      desktopSocketUrl: window.desktop?.getRealtimeWebSocketUrl?.(),
+    });
     const socket = createSocket(url);
     socketRef.current = socket;
 

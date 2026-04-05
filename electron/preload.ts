@@ -11,6 +11,15 @@ const desktopApi = Object.freeze({
     chrome: process.versions.chrome,
     node: process.versions.node,
   }),
+  getRealtimeWebSocketUrl: () => {
+    const explicitUrl = process.env.MURMUR_WS_URL?.trim();
+    if (explicitUrl) {
+      return explicitUrl;
+    }
+
+    const serverPort = process.env.PORT?.trim() || "3000";
+    return `ws://localhost:${serverPort}/ws`;
+  },
   getSupabaseConfig: () => Object.freeze(readSupabasePublicConfig()),
   shortcut: {
     closePopover: () => ipcRenderer.invoke("shortcut:close-popover"),
