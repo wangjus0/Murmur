@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback } from "react";
-import { float32ToPcm16Base64 } from "../../lib/audio-utils";
+import { AUDIO_SAMPLE_RATE } from "@murmur/shared";
+import { float32ToPcm16Base64, resampleFloat32 } from "../../lib/audio-utils";
 import {
   getSilentCaptureErrorMessage,
   MICROPHONE_FRAME_WATCHDOG_MS,
@@ -9,6 +10,7 @@ import {
 interface UseMicrophoneOptions {
   onAudioChunk: (base64: string) => void;
   onStop: () => void;
+  onStart?: () => void;
   onError?: (message: string) => void;
   onAudioLevel?: (level: number) => void;
 }
@@ -38,6 +40,7 @@ function getMicrophoneErrorMessage(error: unknown): string {
 export function useMicrophone({
   onAudioChunk,
   onStop,
+  onStart,
   onError,
   onAudioLevel,
 }: UseMicrophoneOptions) {
@@ -45,6 +48,9 @@ export function useMicrophone({
   const ctxRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const meterAnimationFrameRef = useRef<number | null>(null);
+  const recordingActiveRef = useRef(false);
   const captureStartedAtMsRef = useRef<number | null>(null);
   const hasReceivedAudioFrameRef = useRef(false);
   const captureWatchdogTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -58,13 +64,25 @@ export function useMicrophone({
 
   const stopActiveRecording = useCallback(
     (notifyStop: boolean) => {
+      if (!recordingActiveRef.current) {
+        return;
+      }
+      recordingActiveRef.current = false;
+
       clearCaptureWatchdog();
 
+      if (meterAnimationFrameRef.current !== null) {
+        cancelAnimationFrame(meterAnimationFrameRef.current);
+        meterAnimationFrameRef.current = null;
+      }
+
       processorRef.current?.disconnect();
+      analyserRef.current?.disconnect();
       void ctxRef.current?.close();
       streamRef.current?.getTracks().forEach((track) => track.stop());
 
       processorRef.current = null;
+      analyserRef.current = null;
       ctxRef.current = null;
       streamRef.current = null;
       captureStartedAtMsRef.current = null;
@@ -113,32 +131,62 @@ export function useMicrophone({
         },
       });
 
-      ctx = new AudioContext({ sampleRate: 16000 });
+      ctx = new AudioContext();
       const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
       processor = ctx.createScriptProcessor(4096, 1, 1);
+      const silentGain = ctx.createGain();
+      silentGain.gain.value = 0;
+
+      const processMeterLevel = () => {
+        const activeAnalyser = analyserRef.current;
+        if (!recordingActiveRef.current || !activeAnalyser) {
+          return;
+        }
+
+        const timeDomain = new Uint8Array(activeAnalyser.fftSize);
+        activeAnalyser.getByteTimeDomainData(timeDomain);
+        let sumSquares = 0;
+        for (let i = 0; i < timeDomain.length; i += 1) {
+          const normalized = (timeDomain[i] - 128) / 128;
+          sumSquares += normalized * normalized;
+        }
+
+        const rms = Math.sqrt(sumSquares / timeDomain.length);
+        onAudioLevel?.(Math.min(1, rms * 10));
+        meterAnimationFrameRef.current = requestAnimationFrame(processMeterLevel);
+      };
 
       processor.onaudioprocess = (e) => {
         hasReceivedAudioFrameRef.current = true;
         const samples = e.inputBuffer.getChannelData(0);
-        const meanSquare = samples.reduce((sum, sample) => sum + sample * sample, 0) / samples.length;
-        const rms = Math.sqrt(meanSquare);
-        const normalizedLevel = Math.min(1, rms * 8);
-        const base64 = float32ToPcm16Base64(samples);
-        onAudioLevel?.(normalizedLevel);
+        const normalizedSamples =
+          ctx && ctx.sampleRate !== AUDIO_SAMPLE_RATE
+            ? resampleFloat32(samples, ctx.sampleRate, AUDIO_SAMPLE_RATE)
+            : samples;
+        const base64 = float32ToPcm16Base64(normalizedSamples);
         onAudioChunk(base64);
       };
 
-      source.connect(processor);
-      processor.connect(ctx.destination);
+      onStart?.();
+
+      source.connect(analyser);
+      analyser.connect(processor);
+      processor.connect(silentGain);
+      silentGain.connect(ctx.destination);
       await ctx.resume();
 
       ctxRef.current = ctx;
       streamRef.current = stream;
       processorRef.current = processor;
+      analyserRef.current = analyser;
       captureStartedAtMsRef.current = Date.now();
       hasReceivedAudioFrameRef.current = false;
+      recordingActiveRef.current = true;
       setIsRecording(true);
       onAudioLevel?.(0);
+      meterAnimationFrameRef.current = requestAnimationFrame(processMeterLevel);
 
       clearCaptureWatchdog();
       captureWatchdogTimeoutRef.current = setTimeout(() => {
@@ -163,15 +211,21 @@ export function useMicrophone({
       return true;
     } catch (error) {
       clearCaptureWatchdog();
+      recordingActiveRef.current = false;
       captureStartedAtMsRef.current = null;
       hasReceivedAudioFrameRef.current = false;
+      if (meterAnimationFrameRef.current !== null) {
+        cancelAnimationFrame(meterAnimationFrameRef.current);
+        meterAnimationFrameRef.current = null;
+      }
       processor?.disconnect();
+      analyserRef.current?.disconnect();
       await ctx?.close();
       stream?.getTracks().forEach((track) => track.stop());
       onError?.(getMicrophoneErrorMessage(error));
       return false;
     }
-  }, [clearCaptureWatchdog, onAudioChunk, onAudioLevel, onError, stopActiveRecording]);
+  }, [clearCaptureWatchdog, onAudioChunk, onAudioLevel, onError, onStart, stopActiveRecording]);
 
   const stopRecording = useCallback(() => {
     stopActiveRecording(true);
