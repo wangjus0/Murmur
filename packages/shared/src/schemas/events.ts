@@ -6,10 +6,11 @@ const TurnStateSchema = z.enum(["idle", "listening", "thinking", "acting", "spea
 
 // ── Intent result schema ───────────────────────────────────
 const IntentResultSchema = z.object({
-  intent: z.enum(["search", "form_fill_draft", "clarify", "web_extract", "multi_site_compare"]),
+  intent: z.enum(["search", "form_fill_draft", "clarify", "web_extract", "multi_site_compare", "quick_answer"]),
   confidence: z.number(),
   query: z.string(),
   clarification: z.string().optional(),
+  answer: z.string().optional(),
 });
 
 // ── Client → Server ────────────────────────────────────────

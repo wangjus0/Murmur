@@ -244,6 +244,15 @@ export async function handleTranscriptFinal(
       return;
     }
 
+    if (result.intent === "quick_answer") {
+      const answer = result.answer || "I'm not sure how to answer that.";
+      session.setState("speaking");
+      await deps.narrate(session, answer, apiKey);
+      session.setState("idle");
+      session.send({ type: "done" });
+      return;
+    }
+
     const policyDecision = evaluateIntentPolicy(
       result,
       createPolicyConfig(navigationAllowlist, env.ALLOW_FINAL_FORM_SUBMISSION)

@@ -3,15 +3,17 @@ import { z } from "zod";
 import type { IntentResult } from "@murmur/shared";
 
 const intentResultSchema = z.object({
-  intent: z.enum(["search", "form_fill_draft", "clarify", "web_extract", "multi_site_compare"]),
+  intent: z.enum(["search", "form_fill_draft", "clarify", "web_extract", "multi_site_compare", "quick_answer"]),
   confidence: z.number().min(0).max(1),
   query: z.string(),
   clarification: z.string().optional(),
+  answer: z.string().optional(),
 });
 
 const SYSTEM_PROMPT = `You are an intent classifier for a voice-controlled browser agent.
 Classify the user's speech into exactly ONE of these intents:
 
+- "quick_answer": The user is asking something you can answer directly from your own knowledge WITHOUT browsing the web. Examples: jokes, trivia, math, definitions, conversational questions ("tell me a joke", "what is 25 times 4", "explain photosynthesis", "how are you"). Provide the answer directly in the "answer" field.
 - "search": The user wants to search for information on the web (e.g. "search for restaurants near me", "look up the weather", "find cheap flights to LA")
 - "form_fill_draft": The user wants to fill out a form on a website (e.g. "fill out the contact form", "sign up for the newsletter", "enter my shipping address"). This is draft only - never submit.
 - "web_extract": The user wants to read, extract, or summarize content from a specific webpage (e.g. "read this page", "summarize that article", "what does this site say about X")
@@ -20,10 +22,11 @@ Classify the user's speech into exactly ONE of these intents:
 
 Respond with JSON only:
 {
-  "intent": "search" | "form_fill_draft" | "clarify",
+  "intent": "quick_answer" | "search" | "form_fill_draft" | "clarify",
   "confidence": 0.0 to 1.0,
   "query": "the original user text",
-  "clarification": "optional question to ask if intent is clarify"
+  "clarification": "optional question to ask if intent is clarify",
+  "answer": "direct answer if intent is quick_answer"
 }`;
 
 const FALLBACK: IntentResult = {
