@@ -27,9 +27,10 @@ export function MicButton({
       return;
     }
 
+    onStartSession();
     const started = await startRecording();
     if (started) {
-      onStartSession();
+      return;
     }
   };
 

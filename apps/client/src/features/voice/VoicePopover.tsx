@@ -57,9 +57,9 @@ export function VoicePopover() {
     }
 
     setError(null);
+    sendStartSession();
     const started = await startRecording();
     if (started) {
-      sendStartSession();
       return;
     }
 
