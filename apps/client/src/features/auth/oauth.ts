@@ -5,7 +5,7 @@ export type OAuthCallbackResult =
   | { type: "error"; message: string }
   | { type: "ignored" };
 
-export type SupportedOtpType = "signup" | "recovery" | "invite" | "magiclink" | "email_change";
+export type SupportedOtpType = "signup" | "recovery" | "invite" | "magiclink" | "email_change" | "email";
 
 const SUPPORTED_OTP_TYPES: ReadonlySet<SupportedOtpType> = new Set([
   "signup",
@@ -13,7 +13,18 @@ const SUPPORTED_OTP_TYPES: ReadonlySet<SupportedOtpType> = new Set([
   "invite",
   "magiclink",
   "email_change",
+  "email",
 ]);
+
+const SUPPORTED_CALLBACK_PATHS: ReadonlySet<string> = new Set(["/callback", "/callback/", "/"]);
+
+function getHashParams(parsedUrl: URL): URLSearchParams {
+  return new URLSearchParams(parsedUrl.hash.startsWith("#") ? parsedUrl.hash.slice(1) : parsedUrl.hash);
+}
+
+function getFirstParam(searchParams: URLSearchParams, hashParams: URLSearchParams, key: string): string | null {
+  return searchParams.get(key) ?? hashParams.get(key);
+}
 
 export function parseOAuthCallback(callbackUrl: string): OAuthCallbackResult {
   let parsed: URL;
@@ -27,12 +38,15 @@ export function parseOAuthCallback(callbackUrl: string): OAuthCallbackResult {
   }
 
   const isExpectedCallback =
-    parsed.protocol === "murmur:" && parsed.hostname === "auth" && parsed.pathname === "/callback";
+    parsed.protocol === "murmur:" && parsed.hostname === "auth" && SUPPORTED_CALLBACK_PATHS.has(parsed.pathname);
   if (!isExpectedCallback) {
     return { type: "ignored" };
   }
 
-  const callbackError = parsed.searchParams.get("error_description") ?? parsed.searchParams.get("error");
+  const hashParams = getHashParams(parsed);
+  const callbackError =
+    getFirstParam(parsed.searchParams, hashParams, "error_description") ??
+    getFirstParam(parsed.searchParams, hashParams, "error");
   if (callbackError) {
     return {
       type: "error",
@@ -40,8 +54,8 @@ export function parseOAuthCallback(callbackUrl: string): OAuthCallbackResult {
     };
   }
 
-  const otpType = parsed.searchParams.get("type");
-  const otpTokenHash = parsed.searchParams.get("token_hash");
+  const otpType = getFirstParam(parsed.searchParams, hashParams, "type");
+  const otpTokenHash = getFirstParam(parsed.searchParams, hashParams, "token_hash");
   if (otpType && otpTokenHash && SUPPORTED_OTP_TYPES.has(otpType as SupportedOtpType)) {
     return {
       type: "otp",
@@ -50,11 +64,10 @@ export function parseOAuthCallback(callbackUrl: string): OAuthCallbackResult {
     };
   }
 
-  const code = parsed.searchParams.get("code");
+  const code = getFirstParam(parsed.searchParams, hashParams, "code");
   if (!code) {
-    const hashParams = new URLSearchParams(parsed.hash.startsWith("#") ? parsed.hash.slice(1) : parsed.hash);
-    const accessToken = hashParams.get("access_token");
-    const refreshToken = hashParams.get("refresh_token");
+    const accessToken = getFirstParam(parsed.searchParams, hashParams, "access_token");
+    const refreshToken = getFirstParam(parsed.searchParams, hashParams, "refresh_token");
     if (accessToken && refreshToken) {
       return {
         type: "session",

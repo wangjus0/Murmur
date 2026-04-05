@@ -30,7 +30,20 @@ In Supabase dashboard:
 
 `murmur://auth/callback`
 
-## 4) Local env values
+Without this allowlist entry, browser verification can succeed but Supabase cannot redirect back to the Electron app.
+
+## 4) Supabase email templates (required for auto return + auto sign-in)
+
+In Supabase dashboard:
+
+1. Open `Authentication` -> `Templates`
+2. For `Confirm signup`, ensure the CTA link uses `{{ .ConfirmationURL }}`
+3. For `Magic Link`, `Change Email Address`, and `Reset Password`, use the same pattern
+4. Do **not** hardcode `Site URL` links in those templates for desktop auth flows
+
+This app sets `emailRedirectTo` / `redirectTo` to `murmur://auth/callback`, so using `{{ .ConfirmationURL }}` ensures the final link returns to the desktop app and lets Supabase complete session creation in-app.
+
+## 5) Local env values
 
 Store these values in `apps/server/.env`:
 
@@ -39,11 +52,23 @@ Store these values in `apps/server/.env`:
 
 The Electron app already reads Supabase public config from the same env source when running `npm run dev:electron`.
 
-## 5) Run and verify
+## 6) Run and verify
 
 1. Start app: `npm run dev:electron`
 2. Click `Continue with Google`
 3. Complete Google consent in browser
-4. Confirm app receives callback and signs in
+4. Confirm app receives callback and signs in automatically
+5. Create a new email/password account and click verification email link
+6. Confirm the link opens the app and the user is signed in without manual login
 
 If sign-up or OAuth returns redirect allowlist errors, verify `murmur://auth/callback` is present in Supabase redirect URLs.
+
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+| --- | --- | --- |
+| `Auth redirect is not allowlisted` | `murmur://auth/callback` missing from Supabase redirect URL allowlist | Add `murmur://auth/callback` under Supabase `Authentication -> URL Configuration` |
+| `Google sign-in is not configured in Supabase` | Google provider disabled or missing client credentials | Enable Google under `Authentication -> Providers` and add Google OAuth client ID/secret |
+| Browser opens but app never signs in | Deep link callback never reaches app (protocol handler issue) | Restart app after first install, then run `open "murmur://auth/callback?code=test"` to verify protocol capture |
+| `Google OAuth client configuration is invalid` | Google OAuth client/secret mismatch in Supabase | Recreate Google web OAuth credentials and update Supabase provider config |
+| `OAuth URL is not allowlisted` before browser opens | Generated OAuth URL does not match Supabase project origin configured in app | Confirm `SUPABASE_URL` is correct in `apps/server/.env` and rerun `npm run dev:electron` |

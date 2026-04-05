@@ -6,9 +6,10 @@ import { createMainWindow, getMainWindow } from "./windows/mainWindow";
 import { createVoicePopoverWindow } from "./windows/voicePopoverWindow";
 import { BACKGROUND_BLUR_GRACE_PERIOD_MS, shouldHideVoicePopoverOnBlur } from "./voicePopoverBehavior";
 import { isMicrophonePermission, isTrustedMicrophoneRequest } from "./permissions/mediaPermissions";
+import { PendingOAuthCallbackStore } from "./oauthCallback";
 
 let appReady = false;
-let pendingOAuthCallbackUrl: string | null = null;
+const pendingOAuthCallbackStore = new PendingOAuthCallbackStore();
 let volatileSessionStore: SessionStoreData = {};
 let voicePopoverWindow: BrowserWindow | null = null;
 let voicePopoverOpenedAtMs: number | null = null;
@@ -122,40 +123,39 @@ function writeSessionStore(store: SessionStoreData): void {
   fs.writeFileSync(filePath, payload);
 }
 
-function normalizeOAuthCallbackUrl(rawUrl: string): string | null {
-  try {
-    const parsed = new URL(rawUrl);
-    const isCallback =
-      parsed.protocol === `${APP_PROTOCOL}:` &&
-      parsed.hostname === "auth" &&
-      parsed.pathname === "/callback";
-    if (!isCallback) {
-      return null;
-    }
-
-    return parsed.toString();
-  } catch {
-    return null;
-  }
-}
-
 function dispatchOAuthCallback(rawUrl: string): void {
-  const callbackUrl = normalizeOAuthCallbackUrl(rawUrl);
+  const callbackUrl = pendingOAuthCallbackStore.setFromRaw(rawUrl);
   if (!callbackUrl) {
     return;
   }
 
-  pendingOAuthCallbackUrl = callbackUrl;
   emitPendingOAuthCallback();
 }
 
+function getOAuthCallbackFromArgv(argv: string[]): string | null {
+  const callbackArg = argv.find((arg) => arg.startsWith(`${APP_PROTOCOL}://`));
+  return callbackArg ?? null;
+}
+
+function registerAsDefaultProtocolClient(): void {
+  const processArguments = process.argv[1] ? [path.resolve(process.argv[1])] : [];
+  const registered = process.defaultApp
+    ? app.setAsDefaultProtocolClient(APP_PROTOCOL, process.execPath, processArguments)
+    : app.setAsDefaultProtocolClient(APP_PROTOCOL);
+
+  if (!registered) {
+    console.error(`[electron] Failed to register protocol handler for ${APP_PROTOCOL}://`);
+  }
+}
+
 function emitPendingOAuthCallback(): void {
-  if (!pendingOAuthCallbackUrl || !app.isReady()) {
+  const pendingCallbackUrl = pendingOAuthCallbackStore.peek();
+  if (!pendingCallbackUrl || !app.isReady()) {
     return;
   }
 
   const win = getMainWindow() ?? createMainWindow();
-  win.webContents.send(OAUTH_CALLBACK_EVENT, pendingOAuthCallbackUrl);
+  win.webContents.send(OAUTH_CALLBACK_EVENT, pendingCallbackUrl);
   win.show();
   win.focus();
 }
@@ -220,9 +220,7 @@ function registerAuthIpcHandlers(config: SupabasePublicConfig): void {
   });
 
   ipcMain.handle("auth:consume-pending-oauth-callback", () => {
-    const callbackUrl = pendingOAuthCallbackUrl;
-    pendingOAuthCallbackUrl = null;
-    return callbackUrl;
+    return pendingOAuthCallbackStore.consume();
   });
 
   ipcMain.handle("permissions:request-microphone-access", async () => {
@@ -268,7 +266,7 @@ function registerProtocolHandlers(): void {
   });
 
   app.on("second-instance", (_event, argv) => {
-    const callbackArg = argv.find((arg) => arg.startsWith(`${APP_PROTOCOL}://`));
+    const callbackArg = getOAuthCallbackFromArgv(argv);
     if (callbackArg) {
       dispatchOAuthCallback(callbackArg);
       return;
@@ -410,8 +408,12 @@ async function bootstrap(): Promise<void> {
 
   const supabaseConfig = readSupabasePublicConfig();
   registerProtocolHandlers();
+  const initialOAuthCallback = getOAuthCallbackFromArgv(process.argv);
+  if (initialOAuthCallback) {
+    dispatchOAuthCallback(initialOAuthCallback);
+  }
   await app.whenReady();
-  app.setAsDefaultProtocolClient(APP_PROTOCOL);
+  registerAsDefaultProtocolClient();
 
   registerAuthIpcHandlers(supabaseConfig);
   registerShortcutIpcHandlers();

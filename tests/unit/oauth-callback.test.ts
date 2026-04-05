@@ -17,6 +17,11 @@ test("parseOAuthCallback returns error for callback failures", () => {
   assert.deepEqual(result, { type: "error", message: "access_denied" });
 });
 
+test("parseOAuthCallback returns hash error_description when present", () => {
+  const result = parseOAuthCallback("murmur://auth/callback#error_description=redirect_not_allowed");
+  assert.deepEqual(result, { type: "error", message: "redirect_not_allowed" });
+});
+
 test("parseOAuthCallback returns OTP token hash for password recovery", () => {
   const result = parseOAuthCallback("murmur://auth/callback?type=recovery&token_hash=tok_123");
   assert.deepEqual(result, { type: "otp", tokenHash: "tok_123", otpType: "recovery" });
@@ -27,7 +32,32 @@ test("parseOAuthCallback returns OTP token hash for signup verification", () => 
   assert.deepEqual(result, { type: "otp", tokenHash: "tok_signup", otpType: "signup" });
 });
 
+test("parseOAuthCallback returns OTP token hash for email verification", () => {
+  const result = parseOAuthCallback("murmur://auth/callback?type=email&token_hash=tok_email");
+  assert.deepEqual(result, { type: "otp", tokenHash: "tok_email", otpType: "email" });
+});
+
+test("parseOAuthCallback supports root callback path used by deep links", () => {
+  const result = parseOAuthCallback("murmur://auth/?type=email&token_hash=tok_root");
+  assert.deepEqual(result, { type: "otp", tokenHash: "tok_root", otpType: "email" });
+});
+
+test("parseOAuthCallback reads token hash payload from URL fragment", () => {
+  const result = parseOAuthCallback("murmur://auth/callback#type=recovery&token_hash=tok_fragment");
+  assert.deepEqual(result, { type: "otp", tokenHash: "tok_fragment", otpType: "recovery" });
+});
+
 test("parseOAuthCallback returns session tokens from hash payload", () => {
   const result = parseOAuthCallback("murmur://auth/callback#access_token=a&refresh_token=b");
   assert.deepEqual(result, { type: "session", accessToken: "a", refreshToken: "b" });
+});
+
+test("parseOAuthCallback supports trailing callback slash", () => {
+  const result = parseOAuthCallback("murmur://auth/callback/?code=abc123");
+  assert.deepEqual(result, { type: "success", code: "abc123" });
+});
+
+test("parseOAuthCallback supports code in hash payload", () => {
+  const result = parseOAuthCallback("murmur://auth/callback#code=hash-code");
+  assert.deepEqual(result, { type: "success", code: "hash-code" });
 });

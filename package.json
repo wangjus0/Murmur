@@ -29,6 +29,14 @@
   "build": {
     "appId": "com.murmur.desktop",
     "productName": "Murmur",
+    "protocols": [
+      {
+        "name": "Murmur Auth Callback",
+        "schemes": [
+          "murmur"
+        ]
+      }
+    ],
     "directories": {
       "output": "release"
     },
