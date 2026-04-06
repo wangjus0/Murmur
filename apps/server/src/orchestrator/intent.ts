@@ -1,11 +1,13 @@
-import { GoogleGenAI } from "@google/genai";
+import type { AiClient } from "../config/ai-client.js";
 import { z } from "zod";
 import type { IntentResult } from "@murmur/shared";
 
 const intentResultSchema = z.object({
-  intent: z.enum(["search", "form_fill_draft", "clarify", "web_extract", "multi_site_compare", "quick_answer"]),
-  confidence: z.number().min(0).max(1),
-  query: z.string(),
+  intent: z
+    .enum(["search", "form_fill_draft", "clarify", "web_extract", "multi_site_compare", "quick_answer"])
+    .nullish(),
+  confidence: z.number().min(0).max(1).nullish(),
+  query: z.string().nullish(),
   // Gemini may return explicit null for optional fields when they are not
   // applicable — use .nullish() (= null | undefined | string) then normalize
   // null → undefined so the rest of the code only ever sees string | undefined.
@@ -81,11 +83,21 @@ function inferIntentFromTranscript(transcript: string): IntentResult["intent"] {
     return "form_fill_draft";
   }
 
+  // General knowledge / conversational questions — answer directly via Gemini
+  // without spinning up a browser session.
+  const quickAnswerSignals =
+    /\b(what is|what's|what are|who is|who's|who are|when is|when was|where is|where are|how do|how does|how many|how much|why is|why does|why are|tell me|explain|define|can you|could you|is it|are there|do you know|how old|how tall|how far|what time|what day|what year|joke|trivia|capital of|meaning of|history of|difference between)\b/.test(
+      text
+    ) && !/(https?:\/\/|website|webpage|open|go to|navigate|click|login|log in|sign in|buy|purchase|order|book|schedule)\b/.test(text);
+  if (quickAnswerSignals) {
+    return "quick_answer";
+  }
+
   return "search";
 }
 
 export async function classifyIntent(
-  ai: GoogleGenAI,
+  ai: AiClient,
   transcript: string,
   historyContext?: string
 ): Promise<IntentResult> {
@@ -108,13 +120,24 @@ export async function classifyIntent(
       };
     }
 
-    const parsed = intentResultSchema.parse(JSON.parse(text));
+    const raw = JSON.parse(text);
+    const parsedResult = intentResultSchema.safeParse(raw);
+    if (!parsedResult.success) {
+      return {
+        ...FALLBACK,
+        intent: inferIntentFromTranscript(transcript),
+        query: transcript,
+      };
+    }
+
+    const parsed = parsedResult.data;
+    const inferredIntent = inferIntentFromTranscript(transcript);
 
     // Normalize nullish fields — Gemini may return explicit null for optional
     // fields that don't apply (e.g. "answer": null when needs_web_search=true).
     const normalized: IntentResult = {
-      intent: parsed.intent,
-      confidence: parsed.confidence,
+      intent: parsed.intent ?? inferredIntent,
+      confidence: parsed.confidence ?? FALLBACK.confidence,
       query: transcript,
       ...(parsed.clarification != null ? { clarification: parsed.clarification } : {}),
       ...(parsed.answer != null ? { answer: parsed.answer } : {}),
@@ -128,8 +151,13 @@ export async function classifyIntent(
       return normalized;
     }
 
-    // For non-clarify intents, fall back to rule-based inference when confidence is low.
-    const inferredIntent = inferIntentFromTranscript(transcript);
+    // Always trust quick_answer from Gemini — overriding it with a rule-based
+    // fallback would route general questions to the slow browser path.
+    if (normalized.intent === "quick_answer") {
+      return normalized;
+    }
+
+    // For other intents, fall back to rule-based inference when confidence is low.
     if (normalized.confidence < 0.6) {
       return {
         intent: inferredIntent,

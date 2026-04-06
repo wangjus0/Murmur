@@ -46,9 +46,14 @@ export function createVoicePopoverWindow(): BrowserWindow {
   const anchoredY = Math.round(workAreaY + workAreaHeight * verticalAnchorRatio - PILL_TOP_OFFSET);
   win.setPosition(centeredX, anchoredY);
   win.webContents.setBackgroundThrottling(false);
-  // Log popover console messages to the terminal
+  // Log popover console messages to the terminal.
+  // Swallow EPIPE — the parent terminal may close before Electron exits.
   win.webContents.on("console-message", (_event, _level, message) => {
-    console.log("[popover]", message);
+    try {
+      console.log("[popover]", message);
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code !== "EPIPE") throw err;
+    }
   });
   // Open all links in the system browser — never navigate the popover window
   win.webContents.on("will-navigate", (event, url) => {

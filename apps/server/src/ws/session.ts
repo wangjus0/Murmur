@@ -1,4 +1,4 @@
-import type { GoogleGenAI } from "@google/genai";
+import type { AiClient } from "../config/ai-client.js";
 import type { ClientEvent, ServerEvent } from "@murmur/shared";
 import { parseClientEvent } from "@murmur/shared";
 import crypto from "node:crypto";
@@ -46,7 +46,7 @@ export class Session {
   readonly id: string;
   private state: SessionTurnState = "idle";
   private ws: WebSocket;
-  private ai: GoogleGenAI;
+  private ai: AiClient;
   private persistence: SessionPersistence;
   private readonly memoryPersistence: SessionPersistenceService | null;
   private readonly connection: SessionConnectionContext;
@@ -63,7 +63,7 @@ export class Session {
 
   constructor(
     ws: WebSocket,
-    ai: GoogleGenAI,
+    ai: AiClient,
     persistence?: SessionPersistence,
     connection: SessionConnectionContext = DEFAULT_CONNECTION,
     memoryPersistence: SessionPersistenceService | null = null

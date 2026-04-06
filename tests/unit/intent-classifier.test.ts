@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { GoogleGenAI } from "@google/genai";
-
+import type { AiClient } from "../../apps/server/src/config/ai-client.ts";
 import { classifyIntent } from "../../apps/server/src/orchestrator/intent.ts";
 
-function createAi(responseText?: string, error?: Error): GoogleGenAI {
+function createAi(responseText?: string, error?: Error): AiClient {
   return {
     models: {
       generateContent: async () => {
@@ -16,7 +15,7 @@ function createAi(responseText?: string, error?: Error): GoogleGenAI {
         return { text: responseText };
       },
     },
-  } as unknown as GoogleGenAI;
+  } as AiClient;
 }
 
 test("classifyIntent returns search result when confidence is high", async () => {
@@ -64,6 +63,22 @@ test("classifyIntent returns heuristic fallback when the model output is invalid
   assert.deepEqual(result, {
     intent: "search",
     confidence: 0.5,
+    query: "do the thing",
+  });
+});
+
+test("classifyIntent handles missing required model fields without throwing", async () => {
+  const ai = createAi(
+    JSON.stringify({
+      query: "ignored by classifier",
+    })
+  );
+
+  const result = await classifyIntent(ai, "do the thing");
+
+  assert.deepEqual(result, {
+    intent: "search",
+    confidence: 0.51,
     query: "do the thing",
   });
 });
