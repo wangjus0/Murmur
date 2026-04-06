@@ -29,3 +29,4 @@ jobs:
           ELEVEN_LABS_API_KEY: test-eleven
           BROWSER_USE_API_KEY: test-browser-use
           GEMINI_API_KEY: test-gemini
+          OPENROUTER_API_KEY: test-openrouter
