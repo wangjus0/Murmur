@@ -1,4 +1,4 @@
-import type { GoogleGenAI } from "@google/genai";
+import type { AiClient } from "../config/ai-client.js";
 import { z } from "zod";
 
 /**
@@ -163,7 +163,7 @@ const FALLBACK_PLAN: ToolPlan = {
 };
 
 export async function generateToolPlan(
-  ai: GoogleGenAI,
+  ai: AiClient,
   userRequest: string,
   intent: string,
   historyContext?: string

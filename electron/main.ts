@@ -27,6 +27,12 @@ if (process.platform === "darwin" && !process.env.OS_ACTIVITY_MODE) {
   process.env.OS_ACTIVITY_MODE = "disable";
 }
 
+// Suppress EPIPE errors on stdout/stderr. These occur when the pipe consumer
+// (e.g. the terminal that launched the app) disconnects while the main process
+// is still running and tries to log. They are always benign in this context.
+process.stdout.on("error", (err: NodeJS.ErrnoException) => { if (err.code !== "EPIPE") throw err; });
+process.stderr.on("error", (err: NodeJS.ErrnoException) => { if (err.code !== "EPIPE") throw err; });
+
 const MACOS_MENU_MODEL_WARNING =
   "representedObject is not a WeakPtrToElectronMenuModelAsNSObject";
 
@@ -53,7 +59,12 @@ function suppressKnownMacOsElectronMenuWarning(): void {
       return true;
     }
 
-    return originalWrite(chunk as never, encoding as never, cb);
+    try {
+      return originalWrite(chunk as never, encoding as never, cb);
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code !== "EPIPE") throw err;
+      return true;
+    }
   }) as typeof process.stderr.write;
 }
 
@@ -871,7 +882,9 @@ app.on("before-quit", () => {
 });
 
 app.on("will-quit", () => {
-  globalShortcut.unregisterAll();
+  if (app.isReady()) {
+    globalShortcut.unregisterAll();
+  }
 });
 
 app.on("window-all-closed", async () => {
