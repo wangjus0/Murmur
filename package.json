@@ -18,7 +18,7 @@
     "build:electron": "npm run build -w apps/client && tsc -p electron/tsconfig.json",
     "package:electron:mac": "test -f build/icons/icon.icns && npm run build:electron && electron-builder --mac --publish never",
     "lint": "npm run lint --workspaces --if-present",
-    "test": "node --import tsx --test --test-isolation=none tests/unit/*.test.ts tests/integration/*.test.ts"
+    "test": "node --import tsx --test tests/unit/*.test.ts tests/integration/*.test.ts"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
