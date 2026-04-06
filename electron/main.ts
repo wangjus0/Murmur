@@ -716,20 +716,27 @@ function registerShortcutIpcHandlers(): void {
     }
   });
 
-  ipcMain.handle("shortcut:reposition-popover", (_event, position: "center" | "top-right") => {
+  ipcMain.handle("shortcut:reposition-popover", (_event, position: "center" | "top-right" | "top-center" | "bottom-center") => {
     // Guard: only reposition when we intentionally have the popover shown.
     // If the window was hidden (e.g. user dismissed it) but the renderer fired
     // a repositionPopover IPC before unmounting, ignore it completely.
     if (!voicePopoverIntentVisible || !voicePopoverWindow || voicePopoverWindow.isDestroyed()) return;
     const { x: waX, y: waY, width: waW, height: waH } = getActiveWorkArea();
+    const [currentWidth, currentHeight] = voicePopoverWindow.getSize();
 
     let targetX: number;
     let targetY: number;
     if (position === "top-right") {
-      targetX = Math.round(waX + waW - POPOVER_WIDTH - 16);
+      targetX = Math.round(waX + waW - currentWidth - 16);
       targetY = Math.round(waY + 16);
+    } else if (position === "top-center") {
+      targetX = Math.round(waX + (waW - currentWidth) / 2);
+      targetY = Math.round(waY + 12);
+    } else if (position === "bottom-center") {
+      targetX = Math.round(waX + (waW - currentWidth) / 2);
+      targetY = Math.round(waY + waH - currentHeight - 8);
     } else {
-      targetX = Math.round(waX + (waW - POPOVER_WIDTH) / 2);
+      targetX = Math.round(waX + (waW - currentWidth) / 2);
       targetY = Math.round(waY + waH * 0.75 - PILL_TOP_OFFSET);
     }
 

@@ -13,7 +13,7 @@ type DesktopSupabaseConfig = {
 type DesktopShortcutApi = {
   closePopover: () => Promise<void>;
   showPopover: () => Promise<void>;
-  repositionPopover: (position: "center" | "top-right") => Promise<void>;
+  repositionPopover: (position: "center" | "top-right" | "top-center" | "bottom-center") => Promise<void>;
   resizePopover: (width: number, height: number, anchorBottom?: boolean) => Promise<void>;
   onPopoverDidShow: (listener: () => void) => () => void;
 };

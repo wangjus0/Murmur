@@ -25,7 +25,7 @@ const desktopApi = Object.freeze({
   shortcut: {
     closePopover: () => ipcRenderer.invoke("shortcut:close-popover"),
     showPopover: () => ipcRenderer.invoke("shortcut:show-popover"),
-    repositionPopover: (position: "center" | "top-right") =>
+    repositionPopover: (position: "center" | "top-right" | "top-center" | "bottom-center") =>
       ipcRenderer.invoke("shortcut:reposition-popover", position),
     resizePopover: (width: number, height: number, anchorBottom?: boolean) =>
       ipcRenderer.invoke("shortcut:resize-popover", width, height, anchorBottom),
