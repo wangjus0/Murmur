@@ -3,9 +3,11 @@ import { z } from "zod";
 import type { IntentResult } from "@murmur/shared";
 
 const intentResultSchema = z.object({
-  intent: z.enum(["search", "form_fill_draft", "clarify", "web_extract", "multi_site_compare", "quick_answer"]),
-  confidence: z.number().min(0).max(1),
-  query: z.string(),
+  intent: z
+    .enum(["search", "form_fill_draft", "clarify", "web_extract", "multi_site_compare", "quick_answer"])
+    .nullish(),
+  confidence: z.number().min(0).max(1).nullish(),
+  query: z.string().nullish(),
   // Gemini may return explicit null for optional fields when they are not
   // applicable — use .nullish() (= null | undefined | string) then normalize
   // null → undefined so the rest of the code only ever sees string | undefined.
@@ -118,13 +120,24 @@ export async function classifyIntent(
       };
     }
 
-    const parsed = intentResultSchema.parse(JSON.parse(text));
+    const raw = JSON.parse(text);
+    const parsedResult = intentResultSchema.safeParse(raw);
+    if (!parsedResult.success) {
+      return {
+        ...FALLBACK,
+        intent: inferIntentFromTranscript(transcript),
+        query: transcript,
+      };
+    }
+
+    const parsed = parsedResult.data;
+    const inferredIntent = inferIntentFromTranscript(transcript);
 
     // Normalize nullish fields — Gemini may return explicit null for optional
     // fields that don't apply (e.g. "answer": null when needs_web_search=true).
     const normalized: IntentResult = {
-      intent: parsed.intent,
-      confidence: parsed.confidence,
+      intent: parsed.intent ?? inferredIntent,
+      confidence: parsed.confidence ?? FALLBACK.confidence,
       query: transcript,
       ...(parsed.clarification != null ? { clarification: parsed.clarification } : {}),
       ...(parsed.answer != null ? { answer: parsed.answer } : {}),
@@ -145,7 +158,6 @@ export async function classifyIntent(
     }
 
     // For other intents, fall back to rule-based inference when confidence is low.
-    const inferredIntent = inferIntentFromTranscript(transcript);
     if (normalized.confidence < 0.6) {
       return {
         intent: inferredIntent,
