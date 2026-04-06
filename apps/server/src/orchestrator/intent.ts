@@ -112,12 +112,15 @@ export async function classifyIntent(
 
     // Normalize nullish fields — Gemini may return explicit null for optional
     // fields that don't apply (e.g. "answer": null when needs_web_search=true).
-    const normalized = {
-      ...parsed,
+    const normalized: IntentResult = {
+      intent: parsed.intent,
+      confidence: parsed.confidence,
       query: transcript,
-      clarification: parsed.clarification ?? undefined,
-      answer: parsed.answer ?? undefined,
-      needs_web_search: parsed.needs_web_search ?? undefined,
+      ...(parsed.clarification != null ? { clarification: parsed.clarification } : {}),
+      ...(parsed.answer != null ? { answer: parsed.answer } : {}),
+      ...(parsed.needs_web_search != null
+        ? { needs_web_search: parsed.needs_web_search }
+        : {}),
     };
 
     // Trust the model's clarify classification — the orchestrator handles the fallback question.

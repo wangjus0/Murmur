@@ -63,7 +63,10 @@ test("refineOutputWithGemini uses refined answer from Gemini", async () => {
     "Step 1: opened google\n1. Murmur demo project - https://example.com/demo"
   );
 
-  assert.equal(result, "Top result: Murmur demo project at https://example.com/demo");
+  assert.deepEqual(result, {
+    displayText: "Top result: Murmur demo project at https://example.com/demo",
+    spokenSummary: "Top result: Murmur demo project at https://example.com/demo",
+  });
 });
 
 test("refineOutputWithGemini falls back to heuristic cleanup when Gemini output is invalid", async () => {
@@ -81,5 +84,8 @@ test("refineOutputWithGemini falls back to heuristic cleanup when Gemini output 
     "I navigated to google.com.\n1. Murmur demo project - https://example.com/demo"
   );
 
-  assert.equal(result, "1. Murmur demo project - https://example.com/demo");
+  assert.deepEqual(result, {
+    displayText: "1. Murmur demo project - https://example.com/demo",
+    spokenSummary: "1. Murmur demo project - https://example.com/demo",
+  });
 });

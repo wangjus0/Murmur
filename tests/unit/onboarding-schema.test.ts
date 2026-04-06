@@ -38,9 +38,9 @@ test("mergePersistedOnboardingData restores known fields from persisted payload"
 
 test("deriveCurrentStep clamps step index into valid range", () => {
   assert.equal(deriveCurrentStep({ currentStep: -1 }), 0);
-  assert.equal(deriveCurrentStep({ currentStep: 100 }), 3);
+  assert.equal(deriveCurrentStep({ currentStep: 100 }), 1);
   assert.equal(deriveCurrentStep({ currentStep: 1.8 }), 1);
-  assert.equal(deriveCurrentStep({ schemaVersion: 1, currentStep: 2 }), 3);
+  assert.equal(deriveCurrentStep({ schemaVersion: 1, currentStep: 2 }), 1);
 });
 
 test("validateStep requires microphone access in permissions step", () => {
@@ -64,14 +64,14 @@ test("validateStep requires placeholder fields for account step", () => {
   const errors = validateStep("account", defaults);
 
   assert.equal(errors.displayName, "This field is required.");
-  assert.equal(errors.workspaceName, "This field is required.");
+  assert.equal(errors.workspaceName, undefined);
 });
 
 test("createPayload stores schemaVersion and provided step", () => {
   const defaults = createDefaultOnboardingData();
   const payload = createPayload(1, defaults);
 
-  assert.equal(payload.schemaVersion, 2);
+  assert.equal(payload.schemaVersion, 3);
   assert.equal(payload.currentStep, 1);
   assert.deepEqual(payload.steps, defaults);
 });

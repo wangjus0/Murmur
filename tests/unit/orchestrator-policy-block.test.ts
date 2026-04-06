@@ -16,6 +16,10 @@ class FakeSession {
   setState(state: "idle" | "listening" | "thinking" | "acting" | "speaking"): void {
     this.states.push(state);
   }
+
+  setBrowserAdapter(): void {
+    // no-op for policy tests
+  }
 }
 
 test("policy block emits safety status and never enters acting", async () => {
@@ -27,10 +31,11 @@ test("policy block emits safety status and never enters acting", async () => {
     {} as GoogleGenAI,
     "fake-key",
     "please fill and submit this checkout form",
+    undefined,
     "google.com",
     {
       classify: async () => ({
-        intent: "form_fill_draft",
+        intent: "form_fill_draft" as const,
         confidence: 0.99,
         query: "please fill and submit this checkout form",
       }),

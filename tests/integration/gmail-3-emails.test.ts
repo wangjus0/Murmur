@@ -63,6 +63,7 @@ test("Gmail 3-emails: integration instruction preserves count from original tran
     makeGeminiAi(GMAIL_REFINED_OUTPUT),
     "elevenlabs-key",
     "Can you check my gmail inbox for my 3 most recent emails",
+    undefined,
     {
       classifyIntent: async () => ({
         intent: "search",
@@ -120,6 +121,7 @@ test("Gmail 3-emails: Gemini output refinement preserves all 3 emails", async ()
     makeGeminiAi(GMAIL_REFINED_OUTPUT),
     "elevenlabs-key",
     "Can you check my gmail inbox for my 3 most recent emails",
+    undefined,
     {
       classifyIntent: async () => ({
         intent: "search",
@@ -173,6 +175,7 @@ test("Gmail 3-emails: fallback narration (no Gemini) still returns all 3 emails"
     ai,
     "elevenlabs-key",
     "Can you check my gmail inbox for my 3 most recent emails",
+    undefined,
     {
       classifyIntent: async () => ({
         intent: "search",

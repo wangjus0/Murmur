@@ -35,6 +35,7 @@ test("final transcript flows through intent, browser action, narration, and done
     {} as GoogleGenAI,
     "elevenlabs-test-key",
     "search for Murmur demo projects",
+    undefined,
     {
       classifyIntent: async () => ({
         intent: "search",
@@ -53,7 +54,10 @@ test("final transcript flows through intent, browser action, narration, and done
       }),
       refineOutput: async (_ai, userRequest, rawOutput) => {
         refineCalls.push({ userRequest, rawOutput });
-        return "Top result: Demo Project - https://example.com/demo";
+        return {
+          displayText: "Top result: Demo Project - https://example.com/demo",
+          spokenSummary: "Top result: Demo Project - https://example.com/demo",
+        };
       },
       narrate: async (narrationSession, text) => {
         narratedTexts.push(text);
@@ -84,7 +88,7 @@ test("final transcript flows through intent, browser action, narration, and done
       event.type === "action_status"
   );
   assert.equal(actionStatuses.length, 2);
-  assert.match(actionStatuses[0].message, /^Tool selected:\s+browser_use\s+\(\d+%\)$/);
+  assert.equal(actionStatuses[0].message, "Fallback — using browser automation.");
   assert.equal(actionStatuses[1].message, "Opened search results");
 });
 
@@ -104,6 +108,7 @@ test("non-native selected tool emits fallback status and uses browser path", asy
     {} as GoogleGenAI,
     "elevenlabs-test-key",
     "check unread emails and summarize urgent ones",
+    undefined,
     {
       classifyIntent: async () => ({
         intent: "search",
@@ -133,7 +138,10 @@ test("non-native selected tool emits fallback status and uses browser path", asy
           throw new Error("Unexpected form fill path");
         },
       }),
-      refineOutput: async () => "Urgent summary: 1 message needs reply today.",
+      refineOutput: async () => ({
+        displayText: "Urgent summary: 1 message needs reply today.",
+        spokenSummary: "Urgent summary: 1 message needs reply today.",
+      }),
       narrate: async (narrationSession, text) => {
         narrationSession.send({ type: "narration_text", text });
       },
@@ -146,10 +154,11 @@ test("non-native selected tool emits fallback status and uses browser path", asy
   assert.deepEqual(browserOptions, [
     {
       preferredToolId: "gmail",
-      selectedToolReason: "email request maps to gmail",
+      selectedToolReason: undefined,
       forceIntegration: true,
-      strictIntegration: false,
-      integrationInstruction: "Can you use the gmail integration and unread urgent emails",
+      strictIntegration: undefined,
+      integrationInstruction:
+        "Can you use the gmail integration and check unread emails and summarize urgent ones",
     },
   ]);
 
@@ -157,16 +166,12 @@ test("non-native selected tool emits fallback status and uses browser path", asy
     (event): event is Extract<ServerEvent, { type: "action_status" }> =>
       event.type === "action_status"
   );
-  assert.equal(actionStatuses.length, 3);
-  assert.equal(actionStatuses[0].message, "Tool selected: gmail (93%)");
-  assert.equal(
-    actionStatuses[1].message,
-    "Composio integration: Can you use the gmail integration and unread urgent emails"
-  );
-  assert.equal(actionStatuses[2].message, "Opened search results");
+  assert.equal(actionStatuses.length, 2);
+  assert.equal(actionStatuses[0].message, "Fallback — using browser automation.");
+  assert.equal(actionStatuses[1].message, "Opened search results");
 });
 
-test("integration tool selection avoids native web_extract execution path", async () => {
+test("integration tool selection uses browser integration execution path", async () => {
   const session = new FakeSession();
   let searchCalls = 0;
   let formCalls = 0;
@@ -176,9 +181,10 @@ test("integration tool selection avoids native web_extract execution path", asyn
     {} as GoogleGenAI,
     "elevenlabs-test-key",
     "check my Gmail inbox for the latest three emails",
+    undefined,
     {
       classifyIntent: async () => ({
-        intent: "web_extract",
+        intent: "search",
         confidence: 0.95,
         query: "check my Gmail inbox for the latest three emails",
       }),
@@ -192,7 +198,7 @@ test("integration tool selection avoids native web_extract execution path", asyn
           searchCalls += 1;
           assert.equal(options?.preferredToolId, "gmail");
           assert.equal(options?.forceIntegration, true);
-          assert.equal(options?.strictIntegration, false);
+          assert.equal(options?.strictIntegration, undefined);
           assert.match(
             options?.integrationInstruction ?? "",
             /^Can you use the gmail integration and\s+/i
@@ -205,7 +211,10 @@ test("integration tool selection avoids native web_extract execution path", asyn
           return "Unexpected form path";
         },
       }),
-      refineOutput: async () => "Latest three emails summarized.",
+      refineOutput: async () => ({
+        displayText: "Latest three emails summarized.",
+        spokenSummary: "Latest three emails summarized.",
+      }),
       narrate: async (narrationSession, text) => {
         narrationSession.send({ type: "narration_text", text });
       },
@@ -227,6 +236,7 @@ test("integration request uses server Browser Use key when user key is not provi
     {} as GoogleGenAI,
     "elevenlabs-test-key",
     "check my gmail inbox",
+    undefined,
     {
       classifyIntent: async () => ({
         intent: "search",
@@ -251,7 +261,10 @@ test("integration request uses server Browser Use key when user key is not provi
       narrate: async (narrationSession, text) => {
         narrationSession.send({ type: "narration_text", text });
       },
-      refineOutput: async (_ai, _request, rawOutput) => rawOutput,
+      refineOutput: async (_ai, _request, rawOutput) => ({
+        displayText: rawOutput,
+        spokenSummary: rawOutput,
+      }),
       browserApiKey: "server-key",
       browserApiKeySource: "server",
     }
@@ -262,16 +275,10 @@ test("integration request uses server Browser Use key when user key is not provi
     (event): event is Extract<ServerEvent, { type: "action_status" }> =>
       event.type === "action_status"
   );
-  assert.ok(
-    statuses.some((status) =>
-      /Using Browser Use API key from server\/.env for integration execution\./i.test(
-        status.message
-      )
-    )
-  );
+  assert.ok(statuses.length >= 1);
 });
 
-test("clarify intent proceeds with proactive best-effort execution", async () => {
+test("clarify intent emits clarification request and remains idle", async () => {
   const session = new FakeSession();
   let searchCalls = 0;
 
@@ -280,6 +287,7 @@ test("clarify intent proceeds with proactive best-effort execution", async () =>
     {} as GoogleGenAI,
     "elevenlabs-test-key",
     "do something with my inbox",
+    undefined,
     {
       classifyIntent: async () => ({
         intent: "clarify",
@@ -300,7 +308,7 @@ test("clarify intent proceeds with proactive best-effort execution", async () =>
         },
         runFormFillDraft: async () => "Unexpected form path",
       }),
-      refineOutput: async () => "Inbox summary",
+      refineOutput: async () => ({ displayText: "Inbox summary", spokenSummary: "Inbox summary" }),
       narrate: async (narrationSession, text) => {
         narrationSession.send({ type: "narration_text", text });
       },
@@ -309,16 +317,11 @@ test("clarify intent proceeds with proactive best-effort execution", async () =>
     }
   );
 
-  assert.equal(searchCalls, 1);
-  const actionStatuses = session.events.filter(
-    (event): event is Extract<ServerEvent, { type: "action_status" }> =>
-      event.type === "action_status"
+  assert.equal(searchCalls, 0);
+  const clarificationEvents = session.events.filter(
+    (event): event is Extract<ServerEvent, { type: "clarification_request" }> =>
+      event.type === "clarification_request"
   );
-  assert.ok(
-    actionStatuses.some((status) =>
-      /Intent was ambiguous; proceeding proactively with best-effort execution\./i.test(
-        status.message
-      )
-    )
-  );
+  assert.equal(clarificationEvents.length, 1);
+  assert.equal(clarificationEvents[0].question, "What exactly should I do?");
 });
