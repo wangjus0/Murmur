@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import type { AiClient } from "../config/ai-client.js";
 import { z } from "zod";
 import type { IntentResult } from "@murmur/shared";
 
@@ -81,11 +81,21 @@ function inferIntentFromTranscript(transcript: string): IntentResult["intent"] {
     return "form_fill_draft";
   }
 
+  // General knowledge / conversational questions — answer directly via Gemini
+  // without spinning up a browser session.
+  const quickAnswerSignals =
+    /\b(what is|what's|what are|who is|who's|who are|when is|when was|where is|where are|how do|how does|how many|how much|why is|why does|why are|tell me|explain|define|can you|could you|is it|are there|do you know|how old|how tall|how far|what time|what day|what year|joke|trivia|capital of|meaning of|history of|difference between)\b/.test(
+      text
+    ) && !/(https?:\/\/|website|webpage|open|go to|navigate|click|login|log in|sign in|buy|purchase|order|book|schedule)\b/.test(text);
+  if (quickAnswerSignals) {
+    return "quick_answer";
+  }
+
   return "search";
 }
 
 export async function classifyIntent(
-  ai: GoogleGenAI,
+  ai: AiClient,
   transcript: string,
   historyContext?: string
 ): Promise<IntentResult> {
@@ -128,7 +138,13 @@ export async function classifyIntent(
       return normalized;
     }
 
-    // For non-clarify intents, fall back to rule-based inference when confidence is low.
+    // Always trust quick_answer from Gemini — overriding it with a rule-based
+    // fallback would route general questions to the slow browser path.
+    if (normalized.intent === "quick_answer") {
+      return normalized;
+    }
+
+    // For other intents, fall back to rule-based inference when confidence is low.
     const inferredIntent = inferIntentFromTranscript(transcript);
     if (normalized.confidence < 0.6) {
       return {

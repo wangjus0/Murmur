@@ -1,5 +1,5 @@
 import { env } from "./config/env.js";
-import { GoogleGenAI } from "@google/genai";
+import { createAiClient } from "./config/ai-client.js";
 import express, { type RequestHandler } from "express";
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
@@ -12,8 +12,8 @@ import { createBrowserUseProfilesRouter } from "./routes/browser-use-profiles.js
 import { createSessionsRouter } from "./routes/sessions.js";
 import { Session } from "./ws/session.js";
 
-// -- Google GenAI client --
-const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
+// -- OpenRouter AI client --
+const ai = createAiClient(env.OPENROUTER_API_KEY);
 
 // -- Express --
 const app = express();

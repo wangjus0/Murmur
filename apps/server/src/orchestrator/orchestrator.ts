@@ -1,4 +1,4 @@
-import type { GoogleGenAI } from "@google/genai";
+import type { AiClient } from "../config/ai-client.js";
 import type { IntentResult, ServerEvent } from "@murmur/shared";
 import { env } from "../config/env.js";
 import { tavilySearch } from "../tools/tavily/tavily-search.js";
@@ -51,11 +51,11 @@ interface BrowserExecutor {
 
 interface TranscriptFinalLegacyDependencies {
   classify?: (
-    ai: GoogleGenAI,
+    ai: AiClient,
     transcript: string
   ) => Promise<IntentResult>;
   classifyIntent?: (
-    ai: GoogleGenAI,
+    ai: AiClient,
     transcript: string
   ) => Promise<IntentResult>;
   narrate?: (
@@ -66,12 +66,12 @@ interface TranscriptFinalLegacyDependencies {
   ) => Promise<void>;
   createBrowserAdapter?: (apiKey: string) => BrowserExecutor;
   selectTool?: (
-    ai: GoogleGenAI,
+    ai: AiClient,
     userRequest: string,
     intent: IntentResult["intent"]
   ) => Promise<ToolSelectionResult>;
   refineOutput?: (
-    ai: GoogleGenAI,
+    ai: AiClient,
     userRequest: string,
     rawOutput: string,
     historyContext?: string
@@ -84,22 +84,22 @@ type TranscriptFinalOverrideDeps = Partial<TranscriptFinalDeps> &
   TranscriptFinalLegacyDependencies;
 
 type TranscriptFinalDeps = Readonly<{
-  classify: (ai: GoogleGenAI, text: string, historyContext?: string) => Promise<IntentResult>;
+  classify: (ai: AiClient, text: string, historyContext?: string) => Promise<IntentResult>;
   narrate: (session: Orchestratable, displayText: string, apiKey: string, spokenText?: string) => Promise<void>;
   createBrowserAdapter: (apiKey: string) => BrowserExecutor;
   selectTool: (
-    ai: GoogleGenAI,
+    ai: AiClient,
     userRequest: string,
     intent: IntentResult["intent"]
   ) => Promise<ToolSelectionResult>;
   refineOutput: (
-    ai: GoogleGenAI,
+    ai: AiClient,
     userRequest: string,
     rawOutput: string,
     historyContext?: string
   ) => Promise<RefinedOutput>;
   refineBrowserQuery: (
-    ai: GoogleGenAI,
+    ai: AiClient,
     userRequest: string,
     intent: IntentResult["intent"],
     toolId: ToolId,
@@ -273,7 +273,7 @@ function buildHistoryContext(history: ConversationHistory): string {
 }
 
 async function maybeCompactHistory(
-  ai: GoogleGenAI,
+  ai: AiClient,
   history: ConversationHistory
 ): Promise<void> {
   if (history.recentTurns.length <= MAX_RECENT_TURNS) {
@@ -346,7 +346,7 @@ Respond with JSON only:
 }`;
 
 async function resolveTranscriptWithContext(
-  ai: GoogleGenAI,
+  ai: AiClient,
   transcript: string,
   historyContext: string
 ): Promise<string> {
@@ -432,7 +432,7 @@ Respond with JSON only:
 }`;
 
 async function synthesizeTavilyAnswer(
-  ai: GoogleGenAI,
+  ai: AiClient,
   userRequest: string,
   searchSummary: string,
   historyContext?: string
@@ -628,7 +628,7 @@ function fallbackBrowserQuery(userRequest: string): string {
 }
 
 async function refineBrowserQueryWithGemini(
-  ai: GoogleGenAI,
+  ai: AiClient,
   userRequest: string,
   intent: IntentResult["intent"],
   toolId: ToolId,
@@ -796,7 +796,7 @@ function buildFallbackSelection(
 }
 
 export async function selectToolWithGemini(
-  ai: GoogleGenAI,
+  ai: AiClient,
   userRequest: string,
   intent: IntentResult["intent"]
 ): Promise<ToolSelectionResult> {
@@ -885,7 +885,7 @@ export interface RefinedOutput {
 }
 
 export async function refineOutputWithGemini(
-  ai: GoogleGenAI,
+  ai: AiClient,
   userRequest: string,
   rawOutput: string,
   historyContext?: string
@@ -1002,7 +1002,7 @@ Respond with JSON only:
  * Returns the summary string on success, or a normalised plain-text fallback on failure.
  */
 async function summarizeForSpeech(
-  ai: GoogleGenAI,
+  ai: AiClient,
   displayText: string
 ): Promise<string> {
   // Short responses are already concise — skip the extra Gemini round-trip.
@@ -1095,7 +1095,7 @@ function resolveDeps(maybeDeps: TranscriptFinalOverrideDeps | undefined): Transc
 
 export async function handleTranscriptFinal(
   session: Orchestratable,
-  ai: GoogleGenAI,
+  ai: AiClient,
   apiKey: string,
   text: string,
   history?: ConversationHistory,
