@@ -1,3 +1,5 @@
+import { isDevPackagedHttpLoopbackOrigin } from "../devRendererOrigin";
+
 const TRUSTED_RENDERER_ORIGINS = new Set(["http://localhost:5173"]);
 
 function normalizeCandidateUrl(rawValue: string | undefined): string | null {
@@ -29,7 +31,10 @@ export function isTrustedRendererUrl(rawUrl: string | undefined): boolean {
       return true;
     }
 
-    return TRUSTED_RENDERER_ORIGINS.has(parsed.origin);
+    return (
+      TRUSTED_RENDERER_ORIGINS.has(parsed.origin) ||
+      isDevPackagedHttpLoopbackOrigin(parsed.origin)
+    );
   } catch {
     return false;
   }

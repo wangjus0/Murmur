@@ -32,11 +32,40 @@ function readPortFromServerDotenv(): string | undefined {
 const wsProxyTarget = process.env.MURMUR_WS_PROXY_TARGET?.trim()
   || `ws://127.0.0.1:${readPortFromServerDotenv() || process.env.PORT?.trim() || "3000"}`;
 
+const devUrlFile = path.resolve(__dirname, "..", "..", ".murmur-vite-dev-url");
+
 export default defineConfig({
   base: "./",
-  plugins: [react()],
+  plugins: [
+    react(),
+    {
+      name: "murmur-write-vite-dev-url",
+      configResolved() {
+        try {
+          fs.unlinkSync(devUrlFile);
+        } catch {
+          // ignore missing / unreadable
+        }
+      },
+      configureServer(server) {
+        server.httpServer?.once("listening", () => {
+          const addr = server.httpServer?.address();
+          if (typeof addr !== "object" || !addr) {
+            return;
+          }
+          const url = `http://localhost:${addr.port}`;
+          try {
+            fs.writeFileSync(devUrlFile, `${url}\n`, "utf-8");
+          } catch {
+            // ignore
+          }
+        });
+      },
+    },
+  ],
   server: {
     port: 5173,
+    strictPort: false,
     proxy: {
       "/ws": {
         target: wsProxyTarget,

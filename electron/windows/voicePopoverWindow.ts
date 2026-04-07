@@ -1,7 +1,6 @@
 import path from "node:path";
 import { app, BrowserWindow, screen, shell } from "electron";
-
-const DEV_RENDERER_ORIGIN = "http://localhost:5173";
+import { isDevPackagedHttpLoopbackOrigin } from "../devRendererOrigin";
 
 function resolvePreloadPath(): string {
   return path.join(__dirname, "..", "preload.js");
@@ -75,7 +74,7 @@ export function createVoicePopoverWindow(): BrowserWindow {
 
   if (canUseDevServer && rendererUrl) {
     const parsedUrl = new URL(rendererUrl);
-    if (parsedUrl.origin !== DEV_RENDERER_ORIGIN) {
+    if (!isDevPackagedHttpLoopbackOrigin(parsedUrl.origin)) {
       throw new Error(`Invalid ELECTRON_RENDERER_URL origin: ${parsedUrl.origin}`);
     }
     void win.loadURL(`${rendererUrl}#/voice-popover`);
