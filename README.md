@@ -9,8 +9,6 @@
   <img src="https://img.shields.io/github/license/wangjus0/Murmur?cacheSeconds=300" alt="License" />
 </p>
 
----
-
 ## Features (WIP)
 
 - [number]+ integrations (ex. google suite, notion, etc)
