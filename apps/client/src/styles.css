@@ -1573,15 +1573,24 @@ body.runtime-macos .app-window-drag-handle {
   transition: transform var(--duration-fast) var(--easing-standard);
 }
 
-.voice-bottom-notch:hover {
+/*
+ * Working phase: motion is driven in VoicePopover via requestAnimationFrame so it
+ * repaints reliably in the transparent Electron window (CSS keyframes were inert).
+ */
+.voice-bottom-notch--working {
+  animation: none;
+  transition: none;
+}
+
+.voice-bottom-notch:hover:not(.voice-bottom-notch--working) {
   transform: translateY(-1px);
 }
 
-.voice-popover-screen--notch .voice-bottom-notch:hover {
+.voice-popover-screen--notch .voice-bottom-notch:hover:not(.voice-bottom-notch--working) {
   transform: none;
 }
 
-.voice-bottom-notch:active {
+.voice-bottom-notch:active:not(.voice-bottom-notch--working) {
   transform: translateY(0);
 }
 
@@ -1598,49 +1607,8 @@ body.runtime-macos .app-window-drag-handle {
 }
 
 .voice-bottom-notch--working .voice-bottom-notch-line {
-  animation: working-notch-wave 1.05s ease-in-out infinite;
+  animation: none;
   transform-origin: center;
-}
-
-.voice-bottom-notch--working .voice-bottom-notch-line::after {
-  content: "";
-  position: absolute;
-  top: -2px;
-  bottom: -2px;
-  left: -26px;
-  width: 26px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.38) 55%, rgba(255, 255, 255, 0) 100%);
-  animation: working-notch-sweep 1.05s ease-in-out infinite;
-}
-
-@keyframes working-notch-wave {
-  0%,
-  100% {
-    transform: scaleX(1);
-    opacity: 0.78;
-  }
-  50% {
-    transform: scaleX(1.26);
-    opacity: 1;
-  }
-}
-
-@keyframes working-notch-sweep {
-  0% {
-    transform: translateX(0);
-    opacity: 0;
-  }
-  20% {
-    opacity: 1;
-  }
-  80% {
-    opacity: 1;
-  }
-  100% {
-    transform: translateX(82px);
-    opacity: 0;
-  }
 }
 
 @keyframes pill-expand-in {
@@ -1660,11 +1628,10 @@ body.runtime-macos .app-window-drag-handle {
 
 @media (prefers-reduced-motion: reduce) {
   .voice-bottom-notch--working .voice-bottom-notch-line {
-    animation: none;
-  }
-
-  .voice-bottom-notch--working .voice-bottom-notch-line::after {
-    animation: none;
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.06),
+      0 0 0 1px rgba(0, 0, 0, 0.32),
+      0 0 12px rgba(110, 150, 255, 0.45);
   }
 
   .voice-pill-wrapper--expand-in {
@@ -3205,10 +3172,14 @@ textarea:focus-visible,
   }
 }
 
+/*
+ * Don't apply the “kill all motion” hack inside the Electron voice-overlay window
+ * (body.voice-popover-mode); that document needs progress feedback on the working notch.
+ */
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  body:not(.voice-popover-mode) *,
+  body:not(.voice-popover-mode) *::before,
+  body:not(.voice-popover-mode) *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;

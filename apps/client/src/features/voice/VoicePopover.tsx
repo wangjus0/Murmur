@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useSession } from "../../hooks/useSession";
 import { useSessionStore } from "../../store/session";
 import { useAudioPlayer } from "../narration/useAudioPlayer";
@@ -50,6 +50,8 @@ export function VoicePopover() {
   const idleAnimFrameRef = useRef<number | null>(null);
   const prevWorkingRef = useRef(false);
   const prevOverlayCollapsedRef = useRef(false);
+  const workingNotchButtonRef = useRef<HTMLButtonElement>(null);
+  const workingNotchLineRef = useRef<HTMLSpanElement>(null);
 
   // Gate all repositionPopover / resizePopover IPC calls until after the main
   // process has finished snapPopoverToCenter(). Without this, effects that fire
@@ -116,6 +118,60 @@ export function VoicePopover() {
   const showWorkingNotch = isWorking && !workingExpanded;
   const showCollapsedNotch = overlayCollapsed || showWorkingNotch;
   const showNotchVisual = showCollapsedNotch;
+
+  // CSS @keyframes often don’t repaint in the transparent Electron popover; drive motion with rAF.
+  useLayoutEffect(() => {
+    const motionAllowed =
+      typeof window !== "undefined" &&
+      !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (!isWorking || !showNotchVisual || !motionAllowed) {
+      return;
+    }
+
+    let rafId = 0;
+    let alive = true;
+    let nullFrames = 0;
+    const t0 = performance.now();
+
+    const tick = (now: number) => {
+      if (!alive) return;
+      const line = workingNotchLineRef.current;
+      const btn = workingNotchButtonRef.current;
+      if (!line || !btn) {
+        nullFrames += 1;
+        if (nullFrames < 90) {
+          rafId = requestAnimationFrame(tick);
+        }
+        return;
+      }
+      nullFrames = 0;
+      const t = (now - t0) / 1000;
+      const scale = 1 + 0.26 * Math.sin(t * Math.PI * 2 * 2.15);
+      const tx = 9 * Math.sin(t * Math.PI * 2 * 1.7);
+      line.style.transformOrigin = "center";
+      line.style.transform = `scaleX(${scale}) translateX(${tx}px)`;
+      const pulse = 0.5 + 0.5 * Math.sin(t * Math.PI * 2 * 1.3);
+      line.style.boxShadow = [
+        "0 1px 0 rgba(255,255,255,0.08)",
+        "0 0 0 1px rgba(0,0,0,0.38)",
+        `0 0 ${16 + pulse * 32}px rgba(120,160,255,${0.55 + pulse * 0.4})`,
+      ].join(", ");
+      btn.style.boxShadow =
+        pulse > 0.3
+          ? `0 0 ${20 + pulse * 28}px rgba(120,160,255,${0.45 + pulse * 0.4})`
+          : "none";
+      rafId = requestAnimationFrame(tick);
+    };
+
+    rafId = requestAnimationFrame(tick);
+    return () => {
+      alive = false;
+      cancelAnimationFrame(rafId);
+      workingNotchLineRef.current?.style.removeProperty("transform");
+      workingNotchLineRef.current?.style.removeProperty("box-shadow");
+      workingNotchButtonRef.current?.style.removeProperty("box-shadow");
+    };
+  }, [isWorking, showNotchVisual]);
 
   const workingLabel =
     workingElapsed < 6 ? "Investigating..." :
@@ -491,6 +547,7 @@ export function VoicePopover() {
       <section className={`voice-popover-shell ${entered ? "voice-popover-shell--entered" : ""}`} aria-live="polite">
         {showNotchVisual && (
           <button
+            ref={workingNotchButtonRef}
             type="button"
             className={`voice-bottom-notch ${isWorking ? "voice-bottom-notch--working" : ""}`}
             onClick={() => {
@@ -503,7 +560,7 @@ export function VoicePopover() {
             title={overlayCollapsed ? "Expand overlay" : "Expand working view"}
             aria-label={overlayCollapsed ? "Expand overlay" : "Expand working view"}
           >
-            <span className="voice-bottom-notch-line" aria-hidden="true" />
+            <span ref={workingNotchLineRef} className="voice-bottom-notch-line" aria-hidden="true" />
           </button>
         )}
         {!showCollapsedNotch && clarificationQuestion && (
