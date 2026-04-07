@@ -13,6 +13,18 @@ test("resolveSessionSocketUrl uses current host for http renderer", () => {
   assert.equal(result, "ws://localhost:5173/ws");
 });
 
+test("resolveSessionSocketUrl prefers desktop socket URL over http dev server host", () => {
+  const result = resolveSessionSocketUrl({
+    locationLike: {
+      protocol: "http:",
+      host: "localhost:5173",
+    },
+    desktopSocketUrl: "ws://127.0.0.1:3001/ws",
+  });
+
+  assert.equal(result, "ws://127.0.0.1:3001/ws");
+});
+
 test("resolveSessionSocketUrl uses desktop socket URL for file renderer", () => {
   const result = resolveSessionSocketUrl({
     locationLike: {
