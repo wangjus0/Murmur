@@ -9,18 +9,40 @@
   <img src="https://img.shields.io/github/license/wangjus0/Murmur?cacheSeconds=300" alt="License" />
 </p>
 
----
+## Features (WIP)
 
-## Development Environment
+- [number]+ integrations (ex. google suite, notion, etc)
+- Automated browser actions (ex. Filling forms, job applications)
+- Supports BYOK if you prefer a more powerful AI agent
+
+## Installation (WIP)
+
+```bash
+  N/A
+```
+
+## To run locally
+
+Clone the project
+
+```bash
+  git clone https://github.com/wangjus0/Murmur.git
+```
+
+Go to the project directory
+
+```bash
+  cd Murmur
+```
 
 Install dependencies
 
 ```bash
-npm i
+  npm install
 ```
 
-Run application
+Start the electron application
 
 ```bash
-npm run dev:electron
+  npm run dev:electron
 ```
