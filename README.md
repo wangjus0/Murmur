@@ -8,3 +8,5 @@
   <img src="https://img.shields.io/github/actions/workflow/status/wangjus0/Murmur/test.yml?branch=main&label=tests" alt="Tests" />
   <img src="https://img.shields.io/github/license/wangjus0/Murmur?cacheSeconds=300" alt="License" />
 </p>
+
+---
