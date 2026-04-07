@@ -17,6 +17,10 @@ const BASE_BAR_SCALE = [0.34, 0.5, 0.72, 0.9, 0.76, 0.92, 0.7, 0.52, 0.36];
 const FLAT_SCALE = new Array(BAR_COUNT).fill(0.12);
 const SILENCE_THRESHOLD = 0.12;
 const SILENCE_TIMEOUT_MS = 3000;
+const WORKING_EXPANDED_WIDTH = 280;
+const WORKING_EXPANDED_HEIGHT = 96;
+const WORKING_NOTCH_WIDTH = 96;
+const WORKING_NOTCH_HEIGHT = 20;
 
 export function VoicePopover() {
   const audioPlayer = useAudioPlayer();
@@ -29,6 +33,7 @@ export function VoicePopover() {
   const clarificationQuestion = useSessionStore((s) => s.clarificationQuestion);
   const [barScales, setBarScales] = useState<number[]>(FLAT_SCALE);
   const [workingElapsed, setWorkingElapsed] = useState(0);
+  const [workingExpanded, setWorkingExpanded] = useState(false);
   const [entered, setEntered] = useState(false);
   const [statusKey, setStatusKey] = useState(0);
   const [textPanelOpen, setTextPanelOpen] = useState(false);
@@ -40,6 +45,8 @@ export function VoicePopover() {
   const hasSpokenRef = useRef(false);
   const stopRecordingRef = useRef<(() => void) | null>(null);
   const prevStatusRef = useRef("");
+  const idleAnimFrameRef = useRef<number | null>(null);
+  const prevWorkingRef = useRef(false);
 
   // Gate all repositionPopover / resizePopover IPC calls until after the main
   // process has finished snapPopoverToCenter(). Without this, effects that fire
@@ -102,6 +109,8 @@ export function VoicePopover() {
 
   // Show response card when narration text exists and we're speaking or just finished
   const showResponseCard = Boolean(narrationText) && (effectiveState === "speaking" || effectiveState === "idle") && !isRecording;
+  const isWorking = effectiveState === "thinking" || effectiveState === "acting";
+  const showWorkingNotch = isWorking && !workingExpanded;
 
   const workingLabel =
     workingElapsed < 6 ? "Investigating..." :
@@ -133,6 +142,52 @@ export function VoicePopover() {
   useEffect(() => {
     isRecordingRef.current = isRecording;
   }, [isRecording]);
+
+  useEffect(() => {
+    if (isWorking && !prevWorkingRef.current) {
+      setWorkingExpanded(false);
+    }
+    prevWorkingRef.current = isWorking;
+  }, [isWorking]);
+
+  // Drive an organic idle wave on the bars when fully idle (not recording, not in any
+  // other animated state). All other states have their own animation in the effect below.
+  useEffect(() => {
+    const shouldAnimate = !isRecording && effectiveState === "idle";
+
+    if (!shouldAnimate) {
+      if (idleAnimFrameRef.current !== null) {
+        cancelAnimationFrame(idleAnimFrameRef.current);
+        idleAnimFrameRef.current = null;
+      }
+      return;
+    }
+
+    let lastTick = 0;
+    const TICK_MS = 32; // ~30 fps — smooth enough with the 55ms CSS height transition
+
+    const tick = (now: number) => {
+      idleAnimFrameRef.current = requestAnimationFrame(tick);
+      if (now - lastTick < TICK_MS) return;
+      lastTick = now;
+
+      const t = now / 1000;
+      setBarScales(Array.from({ length: BAR_COUNT }, (_, i) => {
+        const phase = (i / (BAR_COUNT - 1)) * Math.PI * 1.6;
+        const a = Math.sin(t * 1.3 + phase) * 0.5 + 0.5;
+        const b = Math.sin(t * 2.7 + phase * 0.8 + 1.1) * 0.5 + 0.5;
+        return Number((0.14 + a * 0.22 + b * 0.14).toFixed(3));
+      }));
+    };
+
+    idleAnimFrameRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (idleAnimFrameRef.current !== null) {
+        cancelAnimationFrame(idleAnimFrameRef.current);
+        idleAnimFrameRef.current = null;
+      }
+    };
+  }, [isRecording, effectiveState]);
 
   // Entrance animation on mount; also arm the IPC gate after a short delay so
   // that initial effects (which fire synchronously on mount) don't race against
@@ -186,18 +241,27 @@ export function VoicePopover() {
     }
   }, [narrationText]);
 
-  // Resize window when response card or text panel show/hide
+  // Resize window when response card/text panel/state changes.
+  // During working we use a compact top-center shell.
   useEffect(() => {
     // Always update the ref so anchorBottom is correct on the first ready call.
     const anchorBottom = textPanelOpen !== prevTextPanelOpenRef.current;
     prevTextPanelOpenRef.current = textPanelOpen;
     if (!ipcReadyRef.current) return;
+
+    if (isWorking) {
+      const width = workingExpanded ? WORKING_EXPANDED_WIDTH : WORKING_NOTCH_WIDTH;
+      const height = workingExpanded ? WORKING_EXPANDED_HEIGHT : WORKING_NOTCH_HEIGHT;
+      window.desktop?.shortcut?.resizePopover?.(width, height, false);
+      return;
+    }
+
     const base = showResponseCard ? 300 : 130;
     const extra = textPanelOpen ? 110 : 0;
     // Anchor bottom (grow upward) only when the text panel itself toggled,
     // so the pill stays in place. Response card grows downward normally.
     window.desktop?.shortcut?.resizePopover?.(430, base + extra, anchorBottom);
-  }, [showResponseCard, textPanelOpen]);
+  }, [showResponseCard, textPanelOpen, effectiveState, isWorking, workingExpanded]);
 
   // Re-apply the correct window size whenever the popover is toggled back on.
   // When the overlay is hidden and re-shown, the main process resets the window
@@ -207,12 +271,20 @@ export function VoicePopover() {
   useEffect(() => {
     const unsub = window.desktop?.shortcut?.onPopoverDidShow?.(() => {
       if (!ipcReadyRef.current) return;
+
+      if (isWorking) {
+        const width = workingExpanded ? WORKING_EXPANDED_WIDTH : WORKING_NOTCH_WIDTH;
+        const height = workingExpanded ? WORKING_EXPANDED_HEIGHT : WORKING_NOTCH_HEIGHT;
+        window.desktop?.shortcut?.resizePopover?.(width, height, false);
+        return;
+      }
+
       const base = showResponseCard ? 300 : 130;
       const extra = textPanelOpen ? 110 : 0;
       window.desktop?.shortcut?.resizePopover?.(430, base + extra, false);
     });
     return () => unsub?.();
-  }, [showResponseCard, textPanelOpen]);
+  }, [showResponseCard, textPanelOpen, effectiveState, isWorking, workingExpanded]);
 
   // Animate bars when speaking, go flat when idle
   useEffect(() => {
@@ -230,13 +302,13 @@ export function VoicePopover() {
       return () => clearInterval(id);
     }
 
-    if (effectiveState === "thinking" || effectiveState === "acting") {
+    if (isWorking) {
       setWorkingElapsed(0);
       const startTime = Date.now();
       const elapsedId = setInterval(() => {
         setWorkingElapsed(Math.floor((Date.now() - startTime) / 1000));
       }, 1000);
-      if (ipcReadyRef.current) window.desktop?.shortcut?.repositionPopover?.("top-right");
+      if (ipcReadyRef.current) window.desktop?.shortcut?.repositionPopover?.("bottom-center");
       const id = setInterval(() => {
         const t = Date.now() / 1000;
         setBarScales(
@@ -247,6 +319,11 @@ export function VoicePopover() {
         );
       }, 40);
       return () => { clearInterval(id); clearInterval(elapsedId); };
+    }
+
+    if (effectiveState === "listening") {
+      if (ipcReadyRef.current) window.desktop?.shortcut?.repositionPopover?.("center");
+      return;
     }
 
     if (effectiveState === "idle" && !isRecordingRef.current) {
@@ -275,7 +352,7 @@ export function VoicePopover() {
   const closePopover = useCallback(() => {
     // Reset session state so that when the popover re-opens the stale
     // effectiveState (e.g. "thinking", "acting") doesn't immediately
-    // re-trigger repositionPopover("top-right") before snapPopoverToCenter
+    // re-trigger repositionPopover("bottom-center") before snapPopoverToCenter
     // has had a chance to run in the main process.
     if (isRecordingRef.current) {
       stopRecording();
@@ -350,7 +427,18 @@ export function VoicePopover() {
       onClick={(e) => { if (e.target === e.currentTarget) setTextPanelOpen(false); }}
     >
       <section className={`voice-popover-shell ${entered ? "voice-popover-shell--entered" : ""}`} aria-live="polite">
-        {clarificationQuestion && (
+        {showWorkingNotch && (
+          <button
+            type="button"
+            className="voice-bottom-notch"
+            onClick={() => setWorkingExpanded(true)}
+            title="Expand working view"
+            aria-label="Expand working view"
+          >
+            <span className="voice-bottom-notch-line" aria-hidden="true" />
+          </button>
+        )}
+        {!showWorkingNotch && clarificationQuestion && (
           <ClarificationCard
             question={clarificationQuestion}
             onSubmit={(answer) => {
@@ -362,13 +450,13 @@ export function VoicePopover() {
             }}
           />
         )}
-        {!clarificationQuestion && textPanelOpen && (
+        {!showWorkingNotch && !clarificationQuestion && textPanelOpen && (
           <TextContextPanel
             value={contextText}
             onChange={setContextText}
           />
         )}
-        <div className="voice-pill-wrapper">
+        {!showWorkingNotch && <div className="voice-pill-wrapper">
           <button
             type="button"
             className={`voice-meter-pill ${isRecording ? "voice-meter-pill--recording" : ""} ${effectiveState === "speaking" ? "voice-meter-pill--speaking" : ""} ${(effectiveState === "thinking" || effectiveState === "acting") ? "voice-meter-pill--working" : ""} ${error ? "voice-meter-pill-error" : ""}`}
@@ -382,7 +470,7 @@ export function VoicePopover() {
                 key={index}
                 className="voice-meter-bar"
                 style={{
-                  height: `${Math.round((barScales[index] ?? 0.5) * 27)}px`,
+                  height: `${Math.round((barScales[index] ?? 0.5) * 22)}px`,
                 }}
               />
             ))}
@@ -398,6 +486,17 @@ export function VoicePopover() {
               ✕
             </button>
           )}
+          {isWorking && (
+            <button
+              type="button"
+              className="voice-cancel-btn voice-working-collapse-btn"
+              onClick={() => setWorkingExpanded(false)}
+              title="Collapse to bottom notch"
+              aria-label="Collapse to bottom notch"
+            >
+              ˅
+            </button>
+          )}
           {effectiveState === "speaking" && (
             <button
               type="button"
@@ -409,7 +508,7 @@ export function VoicePopover() {
               ■
             </button>
           )}
-          <button
+          {!isWorking && <button
             type="button"
             className={`voice-cancel-btn voice-text-toggle-btn ${textPanelOpen ? "voice-text-toggle-btn--open" : ""}`}
             style={{ left: 14, right: "auto" }}
@@ -418,15 +517,15 @@ export function VoicePopover() {
             aria-label={textPanelOpen ? "Hide text input" : "Add context via text"}
           >
             ›
-          </button>
-        </div>
-        <p
+          </button>}
+        </div>}
+        {!showWorkingNotch && <p
           key={statusKey}
           className={`voice-popover-status ${error ? "voice-popover-status-error" : ""}`}
         >
           {statusMessage}
-        </p>
-        {showResponseCard && (
+        </p>}
+        {!showWorkingNotch && showResponseCard && (
           <div className="voice-response-card">
             <div className="voice-response-scroll" ref={responseCardRef}>
               <MarkdownResponse text={narrationText} />

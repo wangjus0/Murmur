@@ -29,6 +29,7 @@ export function createVoicePopoverWindow(): BrowserWindow {
     resizable: false,
     minimizable: false,
     maximizable: false,
+    hasShadow: false,
     webPreferences: {
       preload: resolvePreloadPath(),
       contextIsolation: true,
