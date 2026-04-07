@@ -3,3 +3,4 @@ dist/
 dist-electron/
 release/
 apps/server/.env
+.murmur-vite-dev-url

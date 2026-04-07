@@ -1,9 +1,9 @@
 import path from "node:path";
 import { app, BrowserWindow } from "electron";
+import { isDevPackagedHttpLoopbackOrigin } from "../devRendererOrigin";
 
 const MAIN_WINDOW_WIDTH = 1200;
 const MAIN_WINDOW_HEIGHT = 800;
-const DEV_RENDERER_ORIGIN = "http://localhost:5173";
 const DEV_SERVER_BOOT_TIMEOUT_MS = 15_000;
 const DEV_SERVER_RETRY_DELAY_MS = 300;
 
@@ -147,7 +147,7 @@ export function createMainWindow(options: CreateMainWindowOptions = {}): Browser
 
   if (canUseDevServer && rendererUrl) {
     const parsedUrl = new URL(rendererUrl);
-    if (parsedUrl.origin !== DEV_RENDERER_ORIGIN) {
+    if (!isDevPackagedHttpLoopbackOrigin(parsedUrl.origin)) {
       throw new Error(`Invalid ELECTRON_RENDERER_URL origin: ${parsedUrl.origin}`);
     }
     void loadRendererFromDevServer(win, rendererUrl).catch((error) => {
