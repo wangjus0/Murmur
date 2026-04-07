@@ -36,6 +36,13 @@ const desktopApi = Object.freeze({
         ipcRenderer.removeListener("popover:did-show", wrappedListener);
       };
     },
+    onPopoverCollapsedChange: (listener: (collapsed: boolean) => void) => {
+      const wrappedListener = (_event: Electron.IpcRendererEvent, collapsed: boolean) => listener(collapsed);
+      ipcRenderer.on("popover:collapsed-changed", wrappedListener);
+      return () => {
+        ipcRenderer.removeListener("popover:collapsed-changed", wrappedListener);
+      };
+    },
   },
   auth: {
     startGoogleOAuth: (authUrl: string) => ipcRenderer.invoke("auth:start-google-oauth", authUrl),

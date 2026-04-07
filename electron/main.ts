@@ -81,17 +81,32 @@ let voicePopoverOpenedFromBackground = false;
 let pendingVoicePopoverBlurHideTimer: NodeJS.Timeout | null = null;
 // Module-level so hideVoicePopover / showVoicePopover can always cancel it.
 let repositionAnimationId: ReturnType<typeof setInterval> | null = null;
+let popoverTransitionAnimationId: ReturnType<typeof setInterval> | null = null;
 // Track our *intent* to show the popover independently of OS/workspace
 // visibility, which can flicker to false when switching Spaces on macOS.
 // IPC handlers that reposition/resize/close should respect this flag so they
 // don't operate on a window the user has already dismissed.
 let voicePopoverIntentVisible = false;
+let voicePopoverCollapsed = false;
+let voicePopoverExpandingFromNotch = false;
 
 function cancelRepositionAnimation(): void {
   if (repositionAnimationId !== null) {
     clearInterval(repositionAnimationId);
     repositionAnimationId = null;
   }
+}
+
+function cancelPopoverTransitionAnimation(): void {
+  if (popoverTransitionAnimationId !== null) {
+    clearInterval(popoverTransitionAnimationId);
+    popoverTransitionAnimationId = null;
+  }
+}
+
+function cancelPopoverAnimations(): void {
+  cancelRepositionAnimation();
+  cancelPopoverTransitionAnimation();
 }
 
 const GLOBAL_SHORTCUT = "CommandOrControl+Shift+Space";
@@ -579,9 +594,12 @@ function getOrCreateVoicePopover(): BrowserWindow {
     }
 
     cancelRepositionAnimation();
+    cancelPopoverTransitionAnimation();
     voicePopoverOpenedAtMs = null;
     voicePopoverOpenedFromBackground = false;
     voicePopoverIntentVisible = false;
+    voicePopoverCollapsed = false;
+    voicePopoverExpandingFromNotch = false;
     voicePopoverWindow = null;
   });
 
@@ -596,20 +614,44 @@ function showVoicePopover(): void {
     pendingVoicePopoverBlurHideTimer = null;
   }
 
-  // Cancel any reposition animation that was running from a previous session —
+  // Cancel any popover animation that was running from a previous session —
   // this is the main cause of "unexpected location" bugs on re-toggle.
-  cancelRepositionAnimation();
+  cancelPopoverAnimations();
 
   voicePopoverOpenedAtMs = Date.now();
   voicePopoverOpenedFromBackground = BrowserWindow.getFocusedWindow() === null;
 
-  // Snap to a clean centered position and reset to base height BEFORE show()
-  // so the window never flashes at the wrong size or position.
-  snapPopoverToCenter();
+  const wasCollapsed = voicePopoverCollapsed;
 
-  // Mark intent BEFORE show() so that any IPC that fires immediately after
-  // (e.g. from the renderer's mount effects) sees the correct state.
+  // Mark intent BEFORE show()/animate so that any IPC that fires immediately
+  // after sees the correct state.
   voicePopoverIntentVisible = true;
+
+  // If currently collapsed as a bottom notch, animate back to centered home.
+  if (wasCollapsed) {
+    const { x: waX, y: waY, width: waW, height: waH } = getActiveWorkArea();
+    const targetX = Math.round(waX + (waW - POPOVER_WIDTH) / 2);
+    const targetY = Math.round(waY + waH * 0.75 - PILL_TOP_OFFSET);
+
+    // Flip renderer state immediately so it can morph from notch -> pill while
+    // the window is traveling upward.
+    voicePopoverCollapsed = false;
+    voicePopoverExpandingFromNotch = true;
+    win.webContents.send("popover:collapsed-changed", false);
+
+    animatePopoverGeometry(targetX, targetY, POPOVER_WIDTH, POPOVER_HEIGHT_BASE, 500, () => {
+      if (!voicePopoverWindow || voicePopoverWindow.isDestroyed()) return;
+      voicePopoverExpandingFromNotch = false;
+      voicePopoverWindow.webContents.send("popover:did-show");
+    });
+  } else {
+    voicePopoverCollapsed = false;
+    voicePopoverExpandingFromNotch = false;
+    win.webContents.send("popover:collapsed-changed", false);
+    // Snap to a clean centered position and reset to base height BEFORE show()
+    // so the window never flashes at the wrong size or position.
+    snapPopoverToCenter();
+  }
 
   // Re-assert the window level — macOS can reset it between shows.
   win.setAlwaysOnTop(true, "screen-saver");
@@ -629,7 +671,35 @@ function showVoicePopover(): void {
 
   // Notify the renderer that the popover was just shown so it can re-apply
   // the correct window size (e.g. when a response card is already visible).
-  win.webContents.send("popover:did-show");
+  if (!wasCollapsed) {
+    win.webContents.send("popover:did-show");
+  }
+}
+
+function collapseVoicePopoverToNotch(): void {
+  const win = getOrCreateVoicePopover();
+
+  if (pendingVoicePopoverBlurHideTimer !== null) {
+    clearTimeout(pendingVoicePopoverBlurHideTimer);
+    pendingVoicePopoverBlurHideTimer = null;
+  }
+
+  cancelPopoverAnimations();
+
+  voicePopoverIntentVisible = false;
+  voicePopoverCollapsed = true;
+  voicePopoverExpandingFromNotch = false;
+  voicePopoverOpenedAtMs = null;
+  voicePopoverOpenedFromBackground = false;
+
+  win.webContents.send("popover:collapsed-changed", true);
+  win.setAlwaysOnTop(true, "screen-saver");
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  win.show();
+  win.moveTop();
+
+  const { x, y } = getBottomCenterTarget(POPOVER_NOTCH_WIDTH, POPOVER_NOTCH_HEIGHT);
+  animatePopoverGeometry(x, y, POPOVER_NOTCH_WIDTH, POPOVER_NOTCH_HEIGHT, 360);
 }
 
 function toggleVoicePopover(): void {
@@ -638,7 +708,9 @@ function toggleVoicePopover(): void {
   // intentionally showed it. Relying on isVisible() causes double-show or
   // double-hide races when the user switches windows and re-triggers.
   if (voicePopoverIntentVisible) {
-    hideVoicePopover();
+    collapseVoicePopoverToNotch();
+  } else if (voicePopoverCollapsed) {
+    showVoicePopover();
   } else {
     showVoicePopover();
   }
@@ -668,20 +740,23 @@ function hideVoicePopover(): void {
     pendingVoicePopoverBlurHideTimer = null;
   }
 
-  // Always cancel any in-progress reposition animation before hiding.
+  // Always cancel any in-progress popover animation before hiding.
   // If left running, it continues moving the window while hidden and causes
   // "unexpected location" on the next show.
-  cancelRepositionAnimation();
+  cancelPopoverAnimations();
 
   // Mark intent BEFORE hide() so that any in-flight IPC from the renderer
   // (repositionPopover, resizePopover) that arrives after we call hide()
   // is correctly ignored.
   voicePopoverIntentVisible = false;
+  voicePopoverCollapsed = false;
+  voicePopoverExpandingFromNotch = false;
 
   voicePopoverOpenedAtMs = null;
   voicePopoverOpenedFromBackground = false;
 
   if (voicePopoverWindow && !voicePopoverWindow.isDestroyed()) {
+    voicePopoverWindow.webContents.send("popover:collapsed-changed", false);
     // Reset to base size before hiding so the next show() starts clean.
     voicePopoverWindow.setSize(POPOVER_WIDTH, POPOVER_HEIGHT_BASE);
     // hide() is safe to call even if the window is already hidden.
@@ -691,13 +766,67 @@ function hideVoicePopover(): void {
 
 const POPOVER_WIDTH = 430;
 const POPOVER_HEIGHT_BASE = 130;
-const PILL_TOP_OFFSET = 42; // padding(8) + half pill height(34)
+const PILL_TOP_OFFSET = 34; // padding(8) + half pill height(26)
+const POPOVER_NOTCH_WIDTH = 96;
+const POPOVER_NOTCH_HEIGHT = 20;
+const POPOVER_NOTCH_BOTTOM_MARGIN = 8;
 
 /** Returns the work-area of whichever display the cursor is currently on. */
 function getActiveWorkArea(): Electron.Rectangle {
   const cursor = screen.getCursorScreenPoint();
   const display = screen.getDisplayNearestPoint(cursor);
   return display.workArea;
+}
+
+function getBottomCenterTarget(width: number, height: number): { x: number; y: number } {
+  const { x: waX, y: waY, width: waW, height: waH } = getActiveWorkArea();
+  return {
+    x: Math.round(waX + (waW - width) / 2),
+    y: Math.round(waY + waH - height - POPOVER_NOTCH_BOTTOM_MARGIN),
+  };
+}
+
+function animatePopoverGeometry(
+  targetX: number,
+  targetY: number,
+  targetWidth: number,
+  targetHeight: number,
+  durationMs = 320,
+  onDone?: () => void,
+): void {
+  if (!voicePopoverWindow || voicePopoverWindow.isDestroyed()) return;
+
+  cancelPopoverTransitionAnimation();
+
+  const [startX, startY] = voicePopoverWindow.getPosition();
+  const [startWidth, startHeight] = voicePopoverWindow.getSize();
+  const startTime = Date.now();
+  const INTERVAL_MS = 10;
+  const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
+
+  popoverTransitionAnimationId = setInterval(() => {
+    if (!voicePopoverWindow || voicePopoverWindow.isDestroyed()) {
+      cancelPopoverTransitionAnimation();
+      return;
+    }
+
+    const elapsed = Date.now() - startTime;
+    const t = Math.min(elapsed / durationMs, 1);
+    const ease = easeOutCubic(t);
+
+    const width = Math.round(startWidth + (targetWidth - startWidth) * ease);
+    const height = Math.round(startHeight + (targetHeight - startHeight) * ease);
+    const x = Math.round(startX + (targetX - startX) * ease);
+    const y = Math.round(startY + (targetY - startY) * ease);
+
+    voicePopoverWindow.setSize(width, height);
+    voicePopoverWindow.setPosition(x, y);
+
+    if (t >= 1) {
+      cancelPopoverTransitionAnimation();
+      onDone?.();
+    }
+  }, INTERVAL_MS);
 }
 
 /** Snaps the popover to its centered home position on the active display, no animation. */
@@ -732,6 +861,7 @@ function registerShortcutIpcHandlers(): void {
     // If the window was hidden (e.g. user dismissed it) but the renderer fired
     // a repositionPopover IPC before unmounting, ignore it completely.
     if (!voicePopoverIntentVisible || !voicePopoverWindow || voicePopoverWindow.isDestroyed()) return;
+    if (voicePopoverExpandingFromNotch) return;
     const { x: waX, y: waY, width: waW, height: waH } = getActiveWorkArea();
     const [currentWidth, currentHeight] = voicePopoverWindow.getSize();
 
@@ -782,6 +912,7 @@ function registerShortcutIpcHandlers(): void {
   ipcMain.handle("shortcut:resize-popover", (_event, width: number, height: number, anchorBottom?: boolean) => {
     // Guard: ignore resize requests when the popover is not intentionally shown.
     if (!voicePopoverIntentVisible || !voicePopoverWindow || voicePopoverWindow.isDestroyed()) return;
+    if (voicePopoverExpandingFromNotch) return;
     const [oldW, oldH] = voicePopoverWindow.getSize();
     const [oldX, oldY] = voicePopoverWindow.getPosition();
     voicePopoverWindow.setSize(Math.round(width), Math.round(height));

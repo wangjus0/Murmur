@@ -42,7 +42,7 @@ export function createVoicePopoverWindow(): BrowserWindow {
   const primaryDisplay = screen.getPrimaryDisplay();
   const { x: workAreaX, y: workAreaY, width: workAreaWidth, height: workAreaHeight } = primaryDisplay.workArea;
   const centeredX = Math.round(workAreaX + (workAreaWidth - windowWidth) / 2);
-  const PILL_TOP_OFFSET = 42; // padding(8) + half pill height(34) — keeps pill at same Y when window resizes
+  const PILL_TOP_OFFSET = 34; // padding(8) + half pill height(26) — keeps pill at same Y when window resizes
   const anchoredY = Math.round(workAreaY + workAreaHeight * verticalAnchorRatio - PILL_TOP_OFFSET);
   win.setPosition(centeredX, anchoredY);
   win.webContents.setBackgroundThrottling(false);
