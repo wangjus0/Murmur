@@ -1414,12 +1414,12 @@ body.runtime-macos .app-window-drag-handle {
   height: 100vh;
   overflow: hidden;
   display: grid;
-  place-items: center;
+  place-items: start center;
   padding: 8px 5px 25px;
   user-select: none;
   -webkit-app-region: drag;
   background: transparent;
-  font-family: "JetBrains Mono", monospace;
+  font-family: "SF Pro Display", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
 
 .voice-popover-shell {
@@ -1431,6 +1431,15 @@ body.runtime-macos .app-window-drag-handle {
   transform: scale(0.82) translateY(14px);
   transition: opacity 0.32s cubic-bezier(0.22, 1, 0.36, 1),
               transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.voice-popover-screen--notch {
+  place-items: center;
+  padding: 0;
+}
+
+.voice-popover-screen--notch .voice-popover-shell {
+  gap: 0;
 }
 
 .voice-popover-shell--entered {
@@ -1513,6 +1522,12 @@ body.runtime-macos .app-window-drag-handle {
   justify-content: center;
 }
 
+.voice-pill-wrapper--expand-in {
+  animation: pill-expand-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+  transform-origin: center;
+  will-change: transform, opacity;
+}
+
 .voice-cancel-btn {
   position: absolute;
   right: 14px;
@@ -1562,6 +1577,10 @@ body.runtime-macos .app-window-drag-handle {
   transform: translateY(-1px);
 }
 
+.voice-popover-screen--notch .voice-bottom-notch:hover {
+  transform: none;
+}
+
 .voice-bottom-notch:active {
   transform: translateY(0);
 }
@@ -1574,6 +1593,83 @@ body.runtime-macos .app-window-drag-handle {
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.06),
     0 0 0 1px rgba(0, 0, 0, 0.32);
+  position: relative;
+  overflow: hidden;
+}
+
+.voice-bottom-notch--working .voice-bottom-notch-line {
+  animation: working-notch-wave 1.05s ease-in-out infinite;
+  transform-origin: center;
+}
+
+.voice-bottom-notch--working .voice-bottom-notch-line::after {
+  content: "";
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  left: -26px;
+  width: 26px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.38) 55%, rgba(255, 255, 255, 0) 100%);
+  animation: working-notch-sweep 1.05s ease-in-out infinite;
+}
+
+@keyframes working-notch-wave {
+  0%,
+  100% {
+    transform: scaleX(1);
+    opacity: 0.78;
+  }
+  50% {
+    transform: scaleX(1.26);
+    opacity: 1;
+  }
+}
+
+@keyframes working-notch-sweep {
+  0% {
+    transform: translateX(0);
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(82px);
+    opacity: 0;
+  }
+}
+
+@keyframes pill-expand-in {
+  0% {
+    opacity: 0;
+    transform: scaleX(0.46) scaleY(0.62) translateY(1px);
+  }
+  68% {
+    opacity: 1;
+    transform: scaleX(1.03) scaleY(1.01) translateY(0);
+  }
+  100% {
+    opacity: 1;
+    transform: scaleX(1) scaleY(1) translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-bottom-notch--working .voice-bottom-notch-line {
+    animation: none;
+  }
+
+  .voice-bottom-notch--working .voice-bottom-notch-line::after {
+    animation: none;
+  }
+
+  .voice-pill-wrapper--expand-in {
+    animation: none;
+  }
 }
 
 .voice-cancel-btn:hover {
@@ -1590,13 +1686,13 @@ body.runtime-macos .app-window-drag-handle {
   margin: 0;
   width: 200px;
   animation: status-swap 0.2s ease-out both;
-  font-family: "JetBrains Mono", monospace;
+  font-family: "SF Pro Display", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.01em;
   line-height: 1.2;
   text-align: center;
-  color: rgba(255, 255, 255, 0.45);
+  color: #fff;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1646,7 +1742,7 @@ body.runtime-macos .app-window-drag-handle {
 
 .voice-response-text {
   margin: 0;
-  font-family: "JetBrains Mono", monospace;
+  font-family: "SF Pro Display", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
   font-size: 11px;
   font-weight: 400;
   line-height: 1.7;
@@ -1729,7 +1825,7 @@ body.runtime-macos .app-window-drag-handle {
 }
 
 .voice-response-markdown code {
-  font-family: "JetBrains Mono", monospace;
+  font-family: "SF Pro Display", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
   font-size: 10px;
   background: rgba(255, 255, 255, 0.08);
   border-radius: 3px;
@@ -1835,7 +1931,7 @@ body.runtime-macos .app-window-drag-handle {
 
 .voice-clarification-question {
   margin: 0;
-  font-family: "JetBrains Mono", monospace;
+  font-family: "SF Pro Display", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
   font-size: 11px;
   font-weight: 500;
   line-height: 1.55;
@@ -1897,7 +1993,7 @@ body.runtime-macos .app-window-drag-handle {
   box-shadow: none !important;
   -webkit-appearance: none;
   resize: none;
-  font-family: "JetBrains Mono", monospace;
+  font-family: "SF Pro Display", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
   font-size: 11px;
   font-weight: 400;
   line-height: 1.6;

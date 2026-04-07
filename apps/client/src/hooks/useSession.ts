@@ -14,6 +14,7 @@ export function useSession(
   audioPlayer: ReturnType<typeof useAudioPlayer>
 ) {
   const socketRef = useRef<Socket | null>(null);
+  const interruptPendingRef = useRef(false);
   const store = useSessionStore;
 
   useEffect(() => {
@@ -34,6 +35,7 @@ export function useSession(
     socket.onEvent((event) => {
       switch (event.type) {
         case "session_started":
+          interruptPendingRef.current = false;
           store.getState().clearActionTimeline();
           store.getState().setSessionId(event.sessionId);
           store.getState().setConnected(true);
@@ -43,6 +45,15 @@ export function useSession(
           });
           break;
         case "state":
+          if (interruptPendingRef.current && event.state !== "idle") {
+            break;
+          }
+
+          if (event.state === "idle") {
+            interruptPendingRef.current = false;
+            store.getState().setClarificationQuestion(null);
+          }
+
           store.getState().setTurnState(event.state);
           store.getState().addActionTimelineItem({
             kind: "state",
@@ -81,6 +92,7 @@ export function useSession(
           audioPlayer.enqueue(event.audio);
           break;
         case "done":
+          interruptPendingRef.current = false;
           store.getState().setTurnState("idle");
           store.getState().clearActionStatuses();
           store.getState().setClarificationQuestion(null);
@@ -90,6 +102,7 @@ export function useSession(
           });
           break;
         case "error":
+          interruptPendingRef.current = false;
           store.getState().setError(event.message);
           store.getState().addActionTimelineItem({
             kind: "error",
@@ -97,6 +110,9 @@ export function useSession(
           });
           break;
         case "clarification_request":
+          if (interruptPendingRef.current) {
+            break;
+          }
           store.getState().setClarificationQuestion(event.question);
           store.getState().addActionTimelineItem({
             kind: "action",
@@ -137,6 +153,7 @@ export function useSession(
   }, []);
 
   const sendInterrupt = useCallback(() => {
+    interruptPendingRef.current = true;
     socketRef.current?.send({ type: "interrupt" });
   }, []);
 
