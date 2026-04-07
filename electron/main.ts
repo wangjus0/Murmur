@@ -875,7 +875,7 @@ function registerShortcutIpcHandlers(): void {
       targetY = Math.round(waY + 12);
     } else if (position === "bottom-center") {
       targetX = Math.round(waX + (waW - currentWidth) / 2);
-      targetY = Math.round(waY + waH - currentHeight - 8);
+      targetY = Math.round(waY + waH - currentHeight - POPOVER_NOTCH_BOTTOM_MARGIN);
     } else {
       targetX = Math.round(waX + (waW - currentWidth) / 2);
       targetY = Math.round(waY + waH * 0.75 - PILL_TOP_OFFSET);
