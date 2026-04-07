@@ -10,3 +10,17 @@
 </p>
 
 ---
+
+## Development Environment
+
+Install dependencies
+
+```bash
+npm i
+```
+
+Run application
+
+```bash
+npm run dev:electron
+```
