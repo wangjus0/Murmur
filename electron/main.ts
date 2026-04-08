@@ -639,7 +639,7 @@ function showVoicePopover(): void {
     voicePopoverExpandingFromNotch = true;
     win.webContents.send("popover:collapsed-changed", false);
 
-    animatePopoverGeometry(targetX, targetY, POPOVER_WIDTH, POPOVER_HEIGHT_BASE, 500, () => {
+    animatePopoverGeometry(targetX, targetY, POPOVER_WIDTH, POPOVER_HEIGHT_BASE, 280, () => {
       if (!voicePopoverWindow || voicePopoverWindow.isDestroyed()) return;
       voicePopoverExpandingFromNotch = false;
       voicePopoverWindow.webContents.send("popover:did-show");
