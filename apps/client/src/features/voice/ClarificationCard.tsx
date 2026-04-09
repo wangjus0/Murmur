@@ -1,11 +1,12 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type Ref } from "react";
 
 interface ClarificationCardProps {
   question: string;
   onSubmit: (answer: string) => void;
+  containerRef?: Ref<HTMLDivElement>;
 }
 
-export function ClarificationCard({ question, onSubmit }: ClarificationCardProps) {
+export function ClarificationCard({ question, onSubmit, containerRef }: ClarificationCardProps) {
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -17,12 +18,13 @@ export function ClarificationCard({ question, onSubmit }: ClarificationCardProps
   };
 
   return (
-    <div className="voice-clarification-card">
+    <div ref={containerRef} className="voice-clarification-card">
       <p className="voice-clarification-question">{question}</p>
       <div className="voice-clarification-input-row">
         <textarea
           ref={textareaRef}
           className="voice-text-input voice-clarification-input"
+          aria-label="Clarification answer"
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => {
@@ -43,7 +45,7 @@ export function ClarificationCard({ question, onSubmit }: ClarificationCardProps
           disabled={!value.trim()}
           aria-label="Send answer"
         >
-          ↑
+          <span aria-hidden="true">↑</span>
         </button>
       </div>
     </div>
