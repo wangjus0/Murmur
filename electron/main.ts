@@ -915,10 +915,18 @@ function registerShortcutIpcHandlers(): void {
     if (voicePopoverExpandingFromNotch) return;
     const [oldW, oldH] = voicePopoverWindow.getSize();
     const [oldX, oldY] = voicePopoverWindow.getPosition();
-    voicePopoverWindow.setSize(Math.round(width), Math.round(height));
-    const dx = Math.round((oldW - width) / 2);
-    // anchorBottom: keep the bottom edge fixed so the window grows upward
-    const dy = anchorBottom ? Math.round(oldH - height) : 0;
+    
+    const newWidth = Math.round(width);
+    const newHeight = Math.round(height);
+    const dx = Math.round((oldW - newWidth) / 2);
+    
+    // anchorBottom: keep the bottom edge fixed so the window grows upward.
+    // When growing: new height > old height → dy negative → window moves UP
+    // When shrinking: new height < old height → dy positive → window moves DOWN
+    // This ensures the content at the bottom (pill) stays in place.
+    const dy = anchorBottom ? Math.round(oldH - newHeight) : 0;
+    
+    voicePopoverWindow.setSize(newWidth, newHeight);
     voicePopoverWindow.setPosition(oldX + dx, oldY + dy);
   });
 }
