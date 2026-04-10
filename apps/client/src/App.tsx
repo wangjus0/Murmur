@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSession } from "./hooks/useSession";
 import { useAudioPlayer } from "./features/narration/useAudioPlayer";
 import { ActionTimeline } from "./features/browser/ActionTimeline";
+import { TranscriptPanel } from "./features/transcript/TranscriptPanel";
 import { useAuth } from "./features/auth/AuthProvider";
 import { getSupabaseClient } from "./lib/supabase";
 import {
@@ -23,6 +24,7 @@ import {
   getIntegrationAuthDescriptor,
   type IntegrationAuthDescriptor,
 } from "./data/integrationAuthMatrix";
+import { useSessionStore } from "./store/session";
 
 type WorkspaceView = "home" | "integrations" | "settings";
 
@@ -45,6 +47,14 @@ const MICROPHONE_STATUS_LABELS: Record<OnboardingFormData["permissions"]["microp
   unknown: "Unknown",
   unsupported: "Unsupported",
 };
+
+function formatTurnStateLabel(turnState: string): string {
+  if (turnState.length === 0) {
+    return "Idle";
+  }
+
+  return turnState.charAt(0).toUpperCase() + turnState.slice(1);
+}
 
 function formatShortcutParts(shortcut: string): string[] {
   return shortcut
@@ -225,6 +235,16 @@ export function App() {
   >({});
   const [integrationAuthError, setIntegrationAuthError] = useState<string | null>(null);
   const [integrationAuthStatusMessage, setIntegrationAuthStatusMessage] = useState<string | null>(null);
+  const connected = useSessionStore((state) => state.connected);
+  const sessionId = useSessionStore((state) => state.sessionId);
+  const turnState = useSessionStore((state) => state.turnState);
+  const transcriptPartial = useSessionStore((state) => state.transcriptPartial);
+  const transcriptFinals = useSessionStore((state) => state.transcriptFinals);
+  const intent = useSessionStore((state) => state.intent);
+  const narrationText = useSessionStore((state) => state.narrationText);
+  const actionStatuses = useSessionStore((state) => state.actionStatuses);
+  const sessionError = useSessionStore((state) => state.error);
+  const clarificationQuestion = useSessionStore((state) => state.clarificationQuestion);
 
   const shortcutParts = useMemo(
     () => formatShortcutParts(settingsData?.preferences.shortcutBehavior ?? DEFAULT_SHORTCUT),
@@ -267,6 +287,55 @@ export function App() {
     () =>
       isIntegrationConnected(selectedIntegrationDescriptor, selectedIntegrationConnection),
     [selectedIntegrationConnection, selectedIntegrationDescriptor],
+  );
+  const sessionStateTone = sessionError
+    ? "attention"
+    : clarificationQuestion
+      ? "clarify"
+      : connected
+        ? "ready"
+        : "idle";
+  const sessionStateLabel = sessionError
+    ? "Needs attention"
+    : clarificationQuestion
+      ? "Awaiting clarification"
+      : connected
+        ? "Realtime linked"
+        : "Desktop shell only";
+  const latestActionStatus = actionStatuses[actionStatuses.length - 1] ?? null;
+  const currentIntentLabel = intent
+    ? intent.intent.replace(/_/g, " ")
+    : "Awaiting request";
+  const homeMetricCards = useMemo(
+    () => [
+      {
+        label: "Connection",
+        value: connected ? "Live" : "Offline",
+        description: connected ? "WebSocket session is ready for events." : "Waiting for a session handshake.",
+      },
+      {
+        label: "Turn state",
+        value: formatTurnStateLabel(turnState),
+        description: sessionId ? `Session ${sessionId.slice(0, 8)}` : "No active session id yet.",
+      },
+      {
+        label: "Transcript",
+        value: transcriptFinals.length > 0 ? `${transcriptFinals.length} lines` : transcriptPartial ? "Listening live" : "Empty",
+        description: transcriptPartial
+          ? "Partial speech is currently streaming into the desktop shell."
+          : "Transcript history stays visible here after each turn.",
+      },
+      {
+        label: "Intent",
+        value: currentIntentLabel,
+        description: intent?.query ?? "Intent routing will appear after Murmur processes speech.",
+      },
+    ],
+    [connected, currentIntentLabel, intent?.query, sessionId, transcriptFinals.length, transcriptPartial, turnState],
+  );
+  const recentActionStatuses = useMemo(
+    () => actionStatuses.slice(-3).reverse(),
+    [actionStatuses],
   );
   const setupIntegrations = useMemo(
     () =>
@@ -710,35 +779,188 @@ export function App() {
             </div>
 
             {activeView === "home" && (
-              <>
-                <div className="search-wrap" role="search">
-                  <span className="search-icon" aria-hidden="true">◦</span>
-                  <input
-                    className="search-input"
-                    type="search"
-                    placeholder="Search timeline logs"
-                    aria-label="Search timeline logs"
-                  />
-                </div>
-                <div className="app-topbar-home-spacer" aria-hidden="true" />
-              </>
+              <div className="search-wrap" role="search">
+                <span className="search-icon" aria-hidden="true">◦</span>
+                <input
+                  className="search-input"
+                  type="search"
+                  placeholder="Search timeline and session events"
+                  aria-label="Search timeline and session events"
+                />
+              </div>
             )}
+
+            {activeView !== "home" && <div className="app-topbar-fill" aria-hidden="true" />}
+
+            <div className="topbar-actions">
+              <span className={`workspace-status-pill workspace-status-pill-${sessionStateTone}`}>
+                {sessionStateLabel}
+              </span>
+              {user?.email && <span className="app-topbar-identity">{user.email}</span>}
+            </div>
           </header>
 
           {activeView === "home" && (
-            <div className="app-dashboard app-dashboard-timeline">
+            <div className="app-dashboard app-dashboard-home">
               {authError && <div className="alert alert-danger">{authError}</div>}
+              <section className="panel stack-panel hero-card app-hero-panel">
+                <div className="app-hero-topline">
+                  <p className="eyebrow">Desktop control</p>
+                  <span className={`workspace-status-pill workspace-status-pill-${sessionStateTone}`}>
+                    {sessionStateLabel}
+                  </span>
+                </div>
+
+                <div className="app-hero-copy">
+                  <h1 className="app-title">Keep Murmur present on the desktop, not piled onto the call.</h1>
+                  <p className="subtitle">
+                    The shell now handles setup, monitoring, and recovery while the voice pill stays focused on the live overlay.
+                  </p>
+                </div>
+
+                <div className="hero-metric-grid">
+                  {homeMetricCards.map((metric) => (
+                    <article key={metric.label} className="hero-metric-card">
+                      <span className="hero-metric-label">{metric.label}</span>
+                      <strong className="hero-metric-value">{metric.value}</strong>
+                      <p className="hero-metric-copy">{metric.description}</p>
+                    </article>
+                  ))}
+                </div>
+
+                <div className="hero-action-row">
+                  <button
+                    type="button"
+                    className="button button-primary"
+                    onClick={() => {
+                      setActiveView("integrations");
+                    }}
+                  >
+                    Open integrations
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    onClick={() => {
+                      setActiveView("settings");
+                    }}
+                  >
+                    Review voice settings
+                  </button>
+                </div>
+              </section>
+
               <ActionTimeline
                 title="Timeline"
                 emptyMessage="No events yet. Start a session to stream logs."
-                className="timeline-panel-devtools"
+                className="timeline-panel-home"
               />
+
+              <section className="panel stack-panel utility-card workspace-briefing-panel">
+                <div className="workspace-section-head">
+                  <h3 className="panel-heading">Live brief</h3>
+                  <p className="status-note">Current session context without opening the overlay.</p>
+                </div>
+
+                <div className="workspace-briefing-list">
+                  <article className="workspace-briefing-item">
+                    <span className="workspace-briefing-label">Latest action</span>
+                    <p>{latestActionStatus ?? "Waiting for the first action status from the server."}</p>
+                  </article>
+                  <article className="workspace-briefing-item">
+                    <span className="workspace-briefing-label">Clarification</span>
+                    <p>{clarificationQuestion ?? "No clarification requested right now."}</p>
+                  </article>
+                  <article className="workspace-briefing-item">
+                    <span className="workspace-briefing-label">Errors</span>
+                    <p>{sessionError ?? "No runtime errors reported in this session."}</p>
+                  </article>
+                </div>
+              </section>
+
+              <TranscriptPanel />
+
+              <section className="panel stack-panel actions-panel workspace-actions-panel">
+                <div className="workspace-section-head">
+                  <h3 className="panel-heading">Quick setup</h3>
+                  <p className="status-note">The desktop-only tasks operators reach for most.</p>
+                </div>
+
+                <div className="workspace-action-list">
+                  <button
+                    type="button"
+                    className="workspace-action-card"
+                    onClick={() => {
+                      setActiveView("integrations");
+                    }}
+                  >
+                    <span className="workspace-action-title">Connect integrations</span>
+                    <span className="workspace-action-copy">
+                      Open provider setup and credential entry for Browser Use integrations.
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="workspace-action-card"
+                    onClick={() => {
+                      setActiveView("settings");
+                    }}
+                  >
+                    <span className="workspace-action-title">Adjust voice settings</span>
+                    <span className="workspace-action-copy">
+                      Re-check microphone access and update the desktop keybind.
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="workspace-action-card"
+                    onClick={() => {
+                      void handleSignOut();
+                    }}
+                    disabled={isSigningOut}
+                  >
+                    <span className="workspace-action-title">Sign out</span>
+                    <span className="workspace-action-copy">
+                      {isSigningOut ? "Ending the current desktop session." : "Leave the workspace and return to the auth screen."}
+                    </span>
+                  </button>
+                </div>
+              </section>
+
+              <section className="panel stack-panel narration-panel workspace-response-panel">
+                <div className="narration-header">
+                  <h3 className="panel-heading">Response channel</h3>
+                  {audioPlayer.isPlaying && <span className="badge badge-speaking">Speaking</span>}
+                </div>
+                {narrationText ? (
+                  <p>{narrationText}</p>
+                ) : (
+                  <p className="timeline-empty">Narration text will appear here once Murmur speaks back.</p>
+                )}
+                {recentActionStatuses.length > 0 && (
+                  <div className="workspace-response-tags" aria-label="Recent action statuses">
+                    {recentActionStatuses.map((status) => (
+                      <span key={status} className="workspace-response-tag">
+                        {status}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </section>
             </div>
           )}
 
           {activeView === "integrations" && (
             <div className="app-dashboard app-dashboard-integrations">
               <section className="panel stack-panel integrations-panel">
+                <div className="workspace-section-head integrations-hero-head">
+                  <p className="eyebrow">Integrations</p>
+                  <h3 className="panel-heading">Connect the services Murmur can route through Browser Use.</h3>
+                  <p className="status-note">
+                    Browse supported providers, review auth requirements, and keep setup state visible in one place.
+                  </p>
+                </div>
+
                 <section className="integrations-catalog" aria-label="Supported integrations catalog">
                   <div className="integrations-catalog-header">
                     <h4 className="panel-heading">Supported integrations</h4>
@@ -977,7 +1199,13 @@ export function App() {
           {activeView === "settings" && (
             <div className="app-dashboard app-dashboard-settings">
               <section className="panel stack-panel settings-panel">
-                <h3 className="panel-heading">Settings</h3>
+                <div className="workspace-section-head settings-hero-head">
+                  <p className="eyebrow">Settings</p>
+                  <h3 className="panel-heading">Keep profile and voice controls polished between sessions.</h3>
+                  <p className="status-note">
+                    This is the desktop maintenance surface for your name, microphone status, and overlay keybind.
+                  </p>
+                </div>
 
                 {settingsError && <div className="alert alert-danger">{settingsError}</div>}
                 {settingsStatusMessage && <div className="alert alert-info">{settingsStatusMessage}</div>}

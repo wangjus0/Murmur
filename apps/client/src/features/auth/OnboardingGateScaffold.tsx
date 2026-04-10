@@ -120,6 +120,13 @@ const SHORTCUT_KEY_LABELS: Record<string, string> = {
 };
 const DEFAULT_SHORTCUT = "Cmd+Shift+Space";
 
+function formatShortcutParts(shortcut: string): string[] {
+  return shortcut
+    .split("+")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
 type ShortcutInputEvent = {
   key: string;
   metaKey: boolean;
@@ -229,10 +236,7 @@ function AudioSetupStep(props: {
     setIsCapturingShortcut((previous) => !previous);
   };
 
-  const shortcutParts = props.shortcutBehavior
-    .split("+")
-    .map((part) => part.trim())
-    .filter(Boolean);
+  const shortcutParts = formatShortcutParts(props.shortcutBehavior);
 
   return (
     <div className="onboarding-fields">
@@ -754,6 +758,13 @@ export function OnboardingGateScaffold({ onCompleted, initialLoadError }: Onboar
     }
   };
 
+  const shortcutPreviewParts = formatShortcutParts(
+    formData.preferences.shortcutBehavior || DEFAULT_SHORTCUT,
+  );
+  const setupReadinessLabel = isMicrophoneAccessSatisfied(formData.permissions.microphoneAccess)
+    ? "Voice permissions ready"
+    : "Finish setup to unlock voice";
+
   if (isInitializing) {
     return (
       <div className="screen">
@@ -764,20 +775,75 @@ export function OnboardingGateScaffold({ onCompleted, initialLoadError }: Onboar
 
   return (
     <div className="screen onboarding-screen">
-      <div className="onboarding-shell onboarding-shell-minimal">
-        <div className="panel onboarding-card onboarding-main">
-          <header className="onboarding-header onboarding-header-minimal">
+      <div className="onboarding-shell onboarding-shell-cluely">
+        <aside className="panel onboarding-sidebar">
+          <div className="onboarding-sidebar-copy">
             <p className="eyebrow">Quick setup</p>
             <h1 className="onboarding-title">Set up Murmur</h1>
-            <p className="onboarding-step-progress">Step {currentStep + 1} of {STEP_META.length}</p>
-          </header>
+            <p className="onboarding-brief-copy">
+              A tighter setup flow for the desktop shell: clear progress, visible permission state, and one place to get ready before the overlay takes over.
+            </p>
+          </div>
 
-          <section className="section-card onboarding-form-card">
+          <ol className="onboarding-progress-list" aria-label="Onboarding steps">
+            {STEP_META.map((step, index) => {
+              const isActive = index === currentStep;
+              const isComplete = index < currentStep;
+
+              return (
+                <li
+                  key={step.key}
+                  className={`onboarding-progress-item${isActive ? " onboarding-progress-item-active" : ""}${isComplete ? " onboarding-progress-item-complete" : ""}`}
+                >
+                  <span className="onboarding-progress-index">
+                    {isComplete ? "✓" : String(index + 1).padStart(2, "0")}
+                  </span>
+                  <div className="onboarding-progress-copy">
+                    <span className="onboarding-progress-title">{step.title}</span>
+                    <span className="onboarding-progress-description">{step.description}</span>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+
+          <div className="onboarding-preview-stack">
+            <article className="onboarding-preview-card onboarding-preview-card-primary">
+              <span className="onboarding-preview-kicker">Setup readiness</span>
+              <h2 className="onboarding-preview-title">{setupReadinessLabel}</h2>
+              <p className="onboarding-preview-copy">
+                Microphone status is currently {MICROPHONE_STATUS_LABEL[formData.permissions.microphoneAccess].toLowerCase()}.
+              </p>
+            </article>
+
+            <article className="onboarding-preview-card onboarding-preview-card-secondary">
+              <span className="onboarding-preview-label">Audio pill keybind</span>
+              <div className="shortcut-keycaps onboarding-shortcut-preview" aria-label="Current onboarding keybind">
+                {shortcutPreviewParts.map((part, index) => (
+                  <span key={`${part}-${index}`} className="shortcut-keycap-group">
+                    {index > 0 && <span className="shortcut-keycap-plus">+</span>}
+                    <kbd className="shortcut-keycap">{part}</kbd>
+                  </span>
+                ))}
+              </div>
+              <p className="onboarding-preview-copy">
+                Capture the shortcut here so the overlay stays fast and predictable later.
+              </p>
+            </article>
+          </div>
+        </aside>
+
+        <div className="panel onboarding-card onboarding-main onboarding-main-cluely">
+          <header className="onboarding-header onboarding-header-modern">
             <div>
+              <p className="eyebrow">Step {currentStep + 1} of {STEP_META.length}</p>
               <h2 className="onboarding-step-title">{activeStep.title}</h2>
               <p>{activeStep.description}</p>
             </div>
+            <span className="onboarding-step-badge">{activeStep.key === "account" ? "Profile" : "Voice"}</span>
+          </header>
 
+          <section className="section-card onboarding-form-card onboarding-form-card-modern">
             {activeStep.key === "account" && (
               <AccountStep
                 data={formData.account}
@@ -823,7 +889,7 @@ export function OnboardingGateScaffold({ onCompleted, initialLoadError }: Onboar
           {statusMessage && <p className="alert alert-info">{statusMessage}</p>}
           {saveError && <p className="alert alert-danger">{saveError}</p>}
 
-          <footer className="footer-actions footer-actions-minimal">
+          <footer className="footer-actions footer-actions-modern">
             <button
               type="button"
               onClick={() => {
@@ -854,7 +920,7 @@ export function OnboardingGateScaffold({ onCompleted, initialLoadError }: Onboar
                   disabled={isSaving}
                   className="button button-primary"
                 >
-                  Next
+                  Continue
                 </button>
               ) : (
                 <button
@@ -865,7 +931,7 @@ export function OnboardingGateScaffold({ onCompleted, initialLoadError }: Onboar
                   disabled={isSaving}
                   className="button button-primary"
                 >
-                  Finish
+                  Enter workspace
                 </button>
               )}
             </div>
