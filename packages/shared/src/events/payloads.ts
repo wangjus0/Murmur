@@ -6,6 +6,7 @@ import type {
 } from '../schemas/client-inbound.ts';
 import type {
   ActionStatusPayloadInput,
+  BrowserViewPayloadInput,
   DonePayloadInput,
   ErrorPayloadInput,
   IntentPayloadInput,
@@ -27,6 +28,7 @@ export type TranscriptPartialPayload = TranscriptPartialPayloadInput;
 export type TranscriptFinalPayload = TranscriptFinalPayloadInput;
 export type IntentPayload = IntentPayloadInput;
 export type ActionStatusPayload = ActionStatusPayloadInput;
+export type BrowserViewPayload = BrowserViewPayloadInput;
 export type NarrationTextPayload = NarrationTextPayloadInput;
 export type NarrationAudioPayload = NarrationAudioPayloadInput;
 export type DonePayload = DonePayloadInput;
@@ -46,6 +48,7 @@ export type ServerToClientPayloadMap = {
   transcript_final: TranscriptFinalPayload;
   intent: IntentPayload;
   action_status: ActionStatusPayload;
+  browser_view: BrowserViewPayload;
   narration_text: NarrationTextPayload;
   narration_audio: NarrationAudioPayload;
   done: DonePayload;

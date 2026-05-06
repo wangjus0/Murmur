@@ -79,6 +79,17 @@ export interface ActionStatusEvent {
   message: string;
 }
 
+export interface BrowserViewEvent {
+  type: "browser_view";
+  sessionId: string;
+  status: string;
+  liveUrl?: string;
+  screenshotUrl?: string;
+  stepCount?: number;
+  lastStepSummary?: string;
+  isTaskSuccessful?: boolean | null;
+}
+
 export interface NarrationTextEvent {
   type: "narration_text";
   text: string;
@@ -110,6 +121,7 @@ export type ServerEvent =
   | TranscriptFinalEvent
   | IntentEvent
   | ActionStatusEvent
+  | BrowserViewEvent
   | NarrationTextEvent
   | NarrationAudioEvent
   | DoneEvent

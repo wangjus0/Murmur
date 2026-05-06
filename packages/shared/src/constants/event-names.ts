@@ -12,6 +12,7 @@ export const SERVER_TO_CLIENT_EVENT_NAMES = [
   "transcript_final",
   "intent",
   "action_status",
+  "browser_view",
   "narration_text",
   "narration_audio",
   "done",
