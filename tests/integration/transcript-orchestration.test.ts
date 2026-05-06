@@ -291,6 +291,57 @@ test("referential follow-up uses context resolution before local quick answer", 
   assert.deepEqual(narratedTexts, ["The answer is 2."]);
 });
 
+test("short follow-up uses context resolution before browser routing", async () => {
+  const session = new FakeSession();
+  const browserCalls: string[] = [];
+  let aiCalls = 0;
+
+  const ai = {
+    models: {
+      generateContent: async () => {
+        aiCalls += 1;
+        return { text: JSON.stringify({ resolved: "search for Murmur demo projects next week" }) };
+      },
+    },
+  } as unknown as GoogleGenAI;
+
+  await handleTranscriptFinal(
+    session,
+    ai,
+    "elevenlabs-test-key",
+    "next week?",
+    {
+      summary: null,
+      recentTurns: [{ transcript: "search for Murmur demo projects", response: "Found 3 demos." }],
+    },
+    {
+      classifyIntent: async (_ai, transcript) => ({
+        intent: "search",
+        confidence: 0.8,
+        query: transcript,
+      }),
+      createBrowserAdapter: () => ({
+        runSearch: async (query) => {
+          browserCalls.push(query);
+          return "1. Murmur demo next week";
+        },
+        runFormFillDraft: async () => {
+          throw new Error("Unexpected form fill path");
+        },
+      }),
+      narrate: async (narrationSession, text) => {
+        narrationSession.send({ type: "narration_text", text });
+      },
+      tavilyApiKey: "",
+      enableOutputRefinement: false,
+      browserApiKey: "browser-use-test-key",
+    }
+  );
+
+  assert.equal(aiCalls, 1);
+  assert.deepEqual(browserCalls, ["search for Murmur demo projects next week"]);
+});
+
 test("browser-required transcript flows through browser action, direct narration, and done", async () => {
   const session = new FakeSession();
   const browserCalls: string[] = [];
@@ -345,7 +396,9 @@ test("browser-required transcript flows through browser action, direct narration
   assert.deepEqual(session.states, ["thinking", "acting", "speaking", "idle"]);
   assert.deepEqual(browserCalls, ["open google.com and search for Murmur demo projects"]);
   assert.deepEqual(refineCalls, []);
-  assert.deepEqual(narratedTexts, ["1. Demo Project - https://example.com/demo"]);
+  assert.deepEqual(narratedTexts, [
+    "I navigated to search results.\n1. Demo Project - https://example.com/demo",
+  ]);
   assert.equal(session.browserAdapter, null);
 
   assert.deepEqual(
@@ -366,6 +419,49 @@ test("browser-required transcript flows through browser action, direct narration
   );
   assert.equal(browserViews.length, 1);
   assert.equal(browserViews[0].liveUrl, "https://live.browser-use.com/sess_live_preview");
+});
+
+test("browser output keeps full display text while shortening spoken summary", async () => {
+  const session = new FakeSession();
+  const narratedTexts: string[] = [];
+  const spokenTexts: Array<string | undefined> = [];
+  const rawOutput = Array.from({ length: 15 }, (_, index) => `${index + 1}. Result ${index + 1}`).join("\n");
+
+  await handleTranscriptFinal(
+    session,
+    {} as GoogleGenAI,
+    "elevenlabs-test-key",
+    "open google.com and search for Murmur demo projects",
+    undefined,
+    {
+      classifyIntent: async () => ({
+        intent: "search",
+        confidence: 0.95,
+        query: "open google.com and search for Murmur demo projects",
+      }),
+      createBrowserAdapter: () => ({
+        runSearch: async () => rawOutput,
+        runFormFillDraft: async () => {
+          throw new Error("Unexpected form fill path");
+        },
+      }),
+      refineOutput: async () => {
+        throw new Error("Output refinement should not run");
+      },
+      narrate: async (narrationSession, text, _apiKey, spokenText) => {
+        narratedTexts.push(text);
+        spokenTexts.push(spokenText);
+        narrationSession.send({ type: "narration_text", text });
+      },
+      enableOutputRefinement: false,
+      browserApiKey: "browser-use-test-key",
+    }
+  );
+
+  assert.deepEqual(narratedTexts, [rawOutput]);
+  assert.deepEqual(spokenTexts, [
+    Array.from({ length: 12 }, (_, index) => `${index + 1}. Result ${index + 1}`).join("\n"),
+  ]);
 });
 
 test("read-only search uses fast Tavily path and skips Browser Use/refinement", async () => {
@@ -425,6 +521,71 @@ test("read-only search uses fast Tavily path and skips Browser Use/refinement", 
   assert.equal(refineCalls, 0);
   assert.deepEqual(session.states, ["thinking", "acting", "speaking", "idle"]);
   assert.deepEqual(narratedTexts, ["Top result: Demo Project - https://example.com/demo"]);
+});
+
+test("live integration lookup routes to integration before quick-answer Tavily path", async () => {
+  const session = new FakeSession();
+  let aiCalls = 0;
+  let fastSearchCalls = 0;
+  const browserOptions: Array<{
+    preferredToolId?: string;
+    forceIntegration?: boolean;
+    integrationInstruction?: string;
+  }> = [];
+
+  const ai = {
+    models: {
+      generateContent: async () => {
+        aiCalls += 1;
+        throw new Error("Tool guide should not run for deterministic integration matches");
+      },
+    },
+  } as unknown as GoogleGenAI;
+
+  await handleTranscriptFinal(
+    session,
+    ai,
+    "elevenlabs-test-key",
+    "latest emails",
+    undefined,
+    {
+      createBrowserAdapter: () => ({
+        runSearch: async (_query, callbacks, options) => {
+          browserOptions.push({
+            preferredToolId: options?.preferredToolId,
+            forceIntegration: options?.forceIntegration,
+            integrationInstruction: options?.integrationInstruction,
+          });
+          callbacks.onStatus("Opened Gmail integration");
+          return "Inbox: 2 unread emails.";
+        },
+        runFormFillDraft: async () => {
+          throw new Error("Unexpected form fill path");
+        },
+      }),
+      fastSearch: async () => {
+        fastSearchCalls += 1;
+        return null;
+      },
+      narrate: async (narrationSession, text) => {
+        narrationSession.send({ type: "narration_text", text });
+      },
+      tavilyApiKey: "tavily-test-key",
+      enableOutputRefinement: false,
+      browserApiKey: "browser-use-test-key",
+    }
+  );
+
+  assert.equal(aiCalls, 0);
+  assert.equal(fastSearchCalls, 0);
+  assert.deepEqual(browserOptions, [
+    {
+      preferredToolId: "gmail",
+      forceIntegration: true,
+      integrationInstruction:
+        "Can you use the gmail integration and tell me what my most recent emails are",
+    },
+  ]);
 });
 
 test("private integration-like lookup runs tool guide before Tavily fallback", async () => {
@@ -556,7 +717,9 @@ test("read-only search falls back to Browser Use when Tavily is unavailable", as
   assert.deepEqual(browserCalls, ["search for Murmur demo projects"]);
   assert.equal(refineCalls, 0);
   assert.deepEqual(session.states, ["thinking", "acting", "speaking", "idle"]);
-  assert.deepEqual(narratedTexts, ["1. Demo Project - https://example.com/demo"]);
+  assert.deepEqual(narratedTexts, [
+    "I navigated to search results.\n1. Demo Project - https://example.com/demo",
+  ]);
 });
 
 test("deterministic integration routing skips LLM tool guide and uses browser integration path", async () => {

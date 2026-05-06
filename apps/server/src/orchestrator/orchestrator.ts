@@ -343,11 +343,12 @@ async function maybeCompactHistory(
 // Patterns that indicate the user's request may depend on prior context.
 const UNDERSPECIFIED_PATTERNS = [
   /\b(it|that|this|those|these|they|them|there)\b/i,
-  /\b(the same|more of|another|again|like that|like those)\b/i,
+  /\b(the same|same for|also for|more of|another|again|like that|like those)\b/i,
   /^(yes|no|okay|ok|sure|good|bad|nice|great|cool|perfect)\b/i,
   /^(tell me more|what about|and what|but what|so what|how about)\b/i,
   /^(show me|find me|get me|give me|look up|search for)\s+\w{1,3}\b/i,
   /\b(the (first|second|third|last|previous|next) one)\b/i,
+  /^(today|tomorrow|yesterday|tonight|next|last|this|previous)\b/i,
 ];
 
 function isTranscriptContextDependent(
@@ -1226,8 +1227,8 @@ function buildIntegrationOptionsFromTool(
 }
 
 function responseFromRawOutput(rawOutput: string): RefinedOutput {
-  const fallbackText = toCoreNarrationText(rawOutput);
-  return { displayText: fallbackText, spokenSummary: fallbackText };
+  const displayText = rawOutput.trim() || "Task completed.";
+  return { displayText, spokenSummary: toCoreNarrationText(displayText) };
 }
 
 function resolveDeps(maybeDeps: TranscriptFinalOverrideDeps | undefined): TranscriptFinalDeps {
@@ -1334,12 +1335,14 @@ export async function handleTranscriptFinal(
       return; // Do NOT send "done" — session remains open for the user's reply
     }
 
+    const detectedTool = detectExplicitIntegrationTool(resolvedText);
     const shouldPreserveIntegrationRouting = isPotentialPrivateIntegrationRequest(
       classified.intent,
       resolvedText
     );
     const result: IntentResult =
-      shouldPreserveIntegrationRouting && classified.intent === "quick_answer"
+      (detectedTool || shouldPreserveIntegrationRouting) &&
+      classified.intent === "quick_answer"
         ? {
             ...classified,
             intent: "search",
@@ -1417,7 +1420,6 @@ export async function handleTranscriptFinal(
     }
 
     const routingStartMs = Date.now();
-    const detectedTool = detectExplicitIntegrationTool(resolvedText);
     const needsToolPlan =
       !detectedTool &&
       (deps.enableLlmToolGuide || shouldPreserveIntegrationRouting) &&

@@ -269,7 +269,7 @@ test("v3 runSearch session body never contains skillIds or systemPromptExtension
   }
 });
 
-test("v3 runSearch returns output before session cleanup resolves", async () => {
+test("v3 runSearch waits for session cleanup before resolving", async () => {
   const originalFetch = globalThis.fetch;
   let deleteStarted = false;
   let resolveDelete: ((response: Response) => void) | null = null;
@@ -301,11 +301,20 @@ test("v3 runSearch returns output before session cleanup resolves", async () => 
 
   try {
     const adapter = new BrowserAdapter("bu_test_integration_key");
-    const output = await adapter.runSearch("check unread emails", { onStatus: () => {} });
+    let resolved = false;
+    const outputPromise = adapter.runSearch("check unread emails", { onStatus: () => {} }).then((output) => {
+      resolved = true;
+      return output;
+    });
 
-    assert.equal(output, "Task complete before cleanup.");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
     assert.equal(deleteStarted, true);
+    assert.equal(resolved, false);
     resolveDelete?.(new Response(null, { status: 200 }));
+    const output = await outputPromise;
+    assert.equal(resolved, true);
+    assert.equal(output, "Task complete before cleanup.");
   } finally {
     globalThis.fetch = originalFetch;
   }
