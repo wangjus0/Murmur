@@ -666,6 +666,88 @@ test("private integration-like lookup runs tool guide before Tavily fallback", a
   assert.deepEqual(narratedTexts, ["Calendar: Standup at 9 AM."]);
 });
 
+test("integration-assisted tool plan keeps browser live preview events", async () => {
+  const session = new FakeSession();
+  const browserOptions: Array<{
+    preferredToolId?: string;
+    forceIntegration?: boolean;
+    integrationInstruction?: string;
+  }> = [];
+
+  const ai = {
+    models: {
+      generateContent: async () => ({
+        text: JSON.stringify({
+          strategy: "integration_assisted",
+          integrations: ["Exa"],
+          enhanced_prompt: "Use Exa to find official Murmur docs, then open the best result.",
+          reasoning: "Exa can identify candidate pages before browser navigation.",
+        }),
+      }),
+    },
+  } as unknown as GoogleGenAI;
+
+  await handleTranscriptFinal(
+    session,
+    ai,
+    "elevenlabs-test-key",
+    "find official Murmur docs and open the best result",
+    undefined,
+    {
+      classifyIntent: async () => ({
+        intent: "search",
+        confidence: 0.94,
+        query: "find official Murmur docs and open the best result",
+      }),
+      createBrowserAdapter: () => ({
+        runSearch: async (query, callbacks, options) => {
+          assert.equal(
+            query,
+            "Use Exa to find official Murmur docs, then open the best result."
+          );
+          browserOptions.push({
+            preferredToolId: options?.preferredToolId,
+            forceIntegration: options?.forceIntegration,
+            integrationInstruction: options?.integrationInstruction,
+          });
+          callbacks.onStatus("Opened browser result");
+          callbacks.onBrowserView?.({
+            sessionId: "sess_assisted_preview",
+            status: "running",
+            liveUrl: "https://live.browser-use.com/sess_assisted_preview",
+          });
+          return "Opened official docs.";
+        },
+        runFormFillDraft: async () => {
+          throw new Error("Unexpected form fill path");
+        },
+      }),
+      narrate: async (narrationSession, text) => {
+        narrationSession.send({ type: "narration_text", text });
+      },
+      enableLlmToolGuide: true,
+      enableOutputRefinement: false,
+      browserApiKey: "browser-use-test-key",
+    }
+  );
+
+  assert.deepEqual(browserOptions, [
+    {
+      preferredToolId: "exa",
+      forceIntegration: true,
+      integrationInstruction:
+        "Can you use the exa integration and find official murmur docs and open the best result",
+    },
+  ]);
+
+  const browserViews = session.events.filter(
+    (event): event is Extract<ServerEvent, { type: "browser_view" }> =>
+      event.type === "browser_view"
+  );
+  assert.equal(browserViews.length, 1);
+  assert.equal(browserViews[0].liveUrl, "https://live.browser-use.com/sess_assisted_preview");
+});
+
 test("read-only search falls back to Browser Use when Tavily is unavailable", async () => {
   const session = new FakeSession();
   const browserCalls: string[] = [];
@@ -761,6 +843,11 @@ test("deterministic integration routing skips LLM tool guide and uses browser in
             integrationInstruction: options?.integrationInstruction,
           });
           callbacks.onStatus("Opened search results");
+          callbacks.onBrowserView?.({
+            sessionId: "sess_integration_preview",
+            status: "running",
+            liveUrl: "https://live.browser-use.com/sess_integration_preview",
+          });
           return "1. Urgent message summary";
         },
         runFormFillDraft: async () => {
@@ -798,6 +885,12 @@ test("deterministic integration routing skips LLM tool guide and uses browser in
   );
   assert.equal(actionStatuses.length, 1);
   assert.equal(actionStatuses[0].message, "Opened search results");
+
+  const browserViews = session.events.filter(
+    (event): event is Extract<ServerEvent, { type: "browser_view" }> =>
+      event.type === "browser_view"
+  );
+  assert.equal(browserViews.length, 0);
 });
 
 test("integration tool selection uses browser integration execution path", async () => {
