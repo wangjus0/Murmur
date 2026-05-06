@@ -268,6 +268,48 @@ test("v3 runSearch session body never contains skillIds or systemPromptExtension
   }
 });
 
+test("v3 runSearch returns output before session cleanup resolves", async () => {
+  const originalFetch = globalThis.fetch;
+  let deleteStarted = false;
+  let resolveDelete: ((response: Response) => void) | null = null;
+
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = (init?.method ?? "GET").toUpperCase();
+
+    if (method === "POST" && url.includes("/sessions")) {
+      return new Response(JSON.stringify({ id: "sess_v3_cleanup" }), { status: 200 });
+    }
+
+    if (method === "GET" && url.includes("/sessions/sess_v3_cleanup")) {
+      return new Response(
+        JSON.stringify({ status: "stopped", output: "Task complete before cleanup." }),
+        { status: 200 }
+      );
+    }
+
+    if (method === "DELETE") {
+      deleteStarted = true;
+      return new Promise<Response>((resolve) => {
+        resolveDelete = resolve;
+      });
+    }
+
+    throw new Error(`Unexpected fetch call: ${method} ${url}`);
+  }) as typeof fetch;
+
+  try {
+    const adapter = new BrowserAdapter("bu_test_integration_key");
+    const output = await adapter.runSearch("check unread emails", { onStatus: () => {} });
+
+    assert.equal(output, "Task complete before cleanup.");
+    assert.equal(deleteStarted, true);
+    resolveDelete?.(new Response(null, { status: 200 }));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("v3 runSearch sends profileId using Browser Use API field casing", async () => {
   const originalFetch = globalThis.fetch;
   let capturedBody: Record<string, unknown> | null = null;

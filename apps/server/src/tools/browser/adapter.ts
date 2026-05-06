@@ -274,8 +274,9 @@ export class BrowserAdapter implements BrowserTaskExecutor {
 
       return "Task was interrupted.";
     } finally {
-      await this.stopSession(this.currentSessionId);
+      const sessionIdToStop = this.currentSessionId;
       this.currentSessionId = null;
+      void this.stopSession(sessionIdToStop);
     }
   }
 

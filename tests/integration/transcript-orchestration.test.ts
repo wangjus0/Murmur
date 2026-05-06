@@ -214,7 +214,84 @@ test("conversational acknowledgement stays local and skips tool routing", async 
   assert.deepEqual(narratedTexts, ["Glad that helped."]);
 });
 
-test("final transcript flows through intent, browser action, narration, and done", async () => {
+test("conversational acknowledgement skips context resolution even with history", async () => {
+  const session = new FakeSession();
+  let aiCalls = 0;
+
+  const ai = {
+    models: {
+      generateContent: async () => {
+        aiCalls += 1;
+        throw new Error("Context resolution should not run for local acknowledgements");
+      },
+    },
+  } as unknown as GoogleGenAI;
+
+  await handleTranscriptFinal(
+    session,
+    ai,
+    "elevenlabs-test-key",
+    "That's great.",
+    {
+      summary: null,
+      recentTurns: [{ transcript: "what is one plus one", response: "The answer is 2." }],
+    },
+    {
+      createBrowserAdapter: () => ({
+        runSearch: async () => "unexpected",
+        runFormFillDraft: async () => "unexpected",
+      }),
+      narrate: async (narrationSession, text) => {
+        narrationSession.send({ type: "narration_text", text });
+      },
+      browserApiKey: "browser-use-test-key",
+    }
+  );
+
+  assert.equal(aiCalls, 0);
+});
+
+test("referential follow-up uses context resolution before local quick answer", async () => {
+  const session = new FakeSession();
+  const narratedTexts: string[] = [];
+  let aiCalls = 0;
+
+  const ai = {
+    models: {
+      generateContent: async () => {
+        aiCalls += 1;
+        return { text: JSON.stringify({ resolved: "what is one plus one" }) };
+      },
+    },
+  } as unknown as GoogleGenAI;
+
+  await handleTranscriptFinal(
+    session,
+    ai,
+    "elevenlabs-test-key",
+    "what about that one?",
+    {
+      summary: null,
+      recentTurns: [{ transcript: "what is two plus two", response: "The answer is 4." }],
+    },
+    {
+      createBrowserAdapter: () => ({
+        runSearch: async () => "unexpected",
+        runFormFillDraft: async () => "unexpected",
+      }),
+      narrate: async (narrationSession, text) => {
+        narratedTexts.push(text);
+        narrationSession.send({ type: "narration_text", text });
+      },
+      browserApiKey: "browser-use-test-key",
+    }
+  );
+
+  assert.equal(aiCalls, 1);
+  assert.deepEqual(narratedTexts, ["The answer is 2."]);
+});
+
+test("browser-required transcript flows through browser action, direct narration, and done", async () => {
   const session = new FakeSession();
   const browserCalls: string[] = [];
   const refineCalls: Array<{ userRequest: string; rawOutput: string }> = [];
@@ -224,13 +301,13 @@ test("final transcript flows through intent, browser action, narration, and done
     session,
     {} as GoogleGenAI,
     "elevenlabs-test-key",
-    "search for Murmur demo projects",
+    "open google.com and search for Murmur demo projects",
     undefined,
     {
       classifyIntent: async () => ({
         intent: "search",
         confidence: 0.95,
-        query: "search for Murmur demo projects",
+        query: "open google.com and search for Murmur demo projects",
       }),
       createBrowserAdapter: () => ({
         runSearch: async (query, callbacks) => {
@@ -258,33 +335,87 @@ test("final transcript flows through intent, browser action, narration, and done
   );
 
   assert.deepEqual(session.states, ["thinking", "acting", "speaking", "idle"]);
-  assert.deepEqual(browserCalls, ["search for Murmur demo projects"]);
-  assert.deepEqual(refineCalls, [
-    {
-      userRequest: "search for Murmur demo projects",
-      rawOutput: "I navigated to search results.\n1. Demo Project - https://example.com/demo",
-    },
-  ]);
-  assert.deepEqual(narratedTexts, ["Top result: Demo Project - https://example.com/demo"]);
+  assert.deepEqual(browserCalls, ["open google.com and search for Murmur demo projects"]);
+  assert.deepEqual(refineCalls, []);
+  assert.deepEqual(narratedTexts, ["1. Demo Project - https://example.com/demo"]);
   assert.equal(session.browserAdapter, null);
 
   assert.deepEqual(
     session.events.map((event) => event.type),
-    ["intent", "action_status", "action_status", "narration_text", "done"]
+    ["intent", "action_status", "narration_text", "done"]
   );
 
   const actionStatuses = session.events.filter(
     (event): event is Extract<ServerEvent, { type: "action_status" }> =>
       event.type === "action_status"
   );
-  assert.equal(actionStatuses.length, 2);
-  assert.equal(actionStatuses[0].message, "Fallback — using browser automation.");
-  assert.equal(actionStatuses[1].message, "Opened search results");
+  assert.equal(actionStatuses.length, 1);
+  assert.equal(actionStatuses[0].message, "Opened search results");
 });
 
-test("non-native selected tool emits fallback status and uses browser path", async () => {
+test("read-only search uses fast Tavily path and skips Browser Use/refinement", async () => {
+  const session = new FakeSession();
+  const narratedTexts: string[] = [];
+  let browserCalls = 0;
+  let fastSearchCalls = 0;
+  let refineCalls = 0;
+
+  await handleTranscriptFinal(
+    session,
+    {} as GoogleGenAI,
+    "elevenlabs-test-key",
+    "search for Murmur demo projects",
+    undefined,
+    {
+      classifyIntent: async () => ({
+        intent: "search",
+        confidence: 0.95,
+        query: "search for Murmur demo projects",
+      }),
+      createBrowserAdapter: () => ({
+        runSearch: async () => {
+          browserCalls += 1;
+          return "unexpected";
+        },
+        runFormFillDraft: async () => {
+          browserCalls += 1;
+          return "unexpected";
+        },
+      }),
+      fastSearch: async (query, apiKey, onStatus) => {
+        fastSearchCalls += 1;
+        assert.equal(query, "search for Murmur demo projects");
+        assert.equal(apiKey, "tavily-test-key");
+        onStatus?.("Fast search finished");
+        return {
+          summary: "Top result: Demo Project - https://example.com/demo",
+          results: [],
+        };
+      },
+      refineOutput: async () => {
+        refineCalls += 1;
+        return { displayText: "unexpected", spokenSummary: "unexpected" };
+      },
+      narrate: async (narrationSession, text) => {
+        narratedTexts.push(text);
+        narrationSession.send({ type: "narration_text", text });
+      },
+      tavilyApiKey: "tavily-test-key",
+      browserApiKey: "browser-use-test-key",
+    }
+  );
+
+  assert.equal(fastSearchCalls, 1);
+  assert.equal(browserCalls, 0);
+  assert.equal(refineCalls, 0);
+  assert.deepEqual(session.states, ["thinking", "acting", "speaking", "idle"]);
+  assert.deepEqual(narratedTexts, ["Top result: Demo Project - https://example.com/demo"]);
+});
+
+test("deterministic integration routing skips LLM tool guide and uses browser integration path", async () => {
   const session = new FakeSession();
   const browserCalls: string[] = [];
+  let selectToolCalls = 0;
   const browserOptions: Array<{
     preferredToolId?: string;
     selectedToolReason?: string;
@@ -305,12 +436,10 @@ test("non-native selected tool emits fallback status and uses browser path", asy
         confidence: 0.91,
         query: "check unread emails and summarize urgent ones",
       }),
-      selectTool: async () => ({
-        toolId: "gmail",
-        confidence: 0.93,
-        reason: "email request maps to gmail",
-        integrationInstruction: "Can you use the gmail integration and unread urgent emails.",
-      }),
+      selectTool: async () => {
+        selectToolCalls += 1;
+        throw new Error("LLM tool selection should not run by default");
+      },
       createBrowserAdapter: () => ({
         runSearch: async (query, callbacks, options) => {
           browserCalls.push(query);
@@ -340,6 +469,7 @@ test("non-native selected tool emits fallback status and uses browser path", asy
     }
   );
 
+  assert.equal(selectToolCalls, 0);
   assert.deepEqual(browserCalls, ["check unread emails and summarize urgent ones"]);
   assert.deepEqual(browserOptions, [
     {
@@ -356,9 +486,8 @@ test("non-native selected tool emits fallback status and uses browser path", asy
     (event): event is Extract<ServerEvent, { type: "action_status" }> =>
       event.type === "action_status"
   );
-  assert.equal(actionStatuses.length, 2);
-  assert.equal(actionStatuses[0].message, "Fallback — using browser automation.");
-  assert.equal(actionStatuses[1].message, "Opened search results");
+  assert.equal(actionStatuses.length, 1);
+  assert.equal(actionStatuses[0].message, "Opened search results");
 });
 
 test("integration tool selection uses browser integration execution path", async () => {
@@ -439,8 +568,9 @@ test("integration request uses server Browser Use key when user key is not provi
         reason: "gmail integration needed",
       }),
       createBrowserAdapter: () => ({
-        runSearch: async () => {
+        runSearch: async (_query, callbacks) => {
           browserCalled = true;
+          callbacks.onStatus("Executed integration path");
           return "unexpected";
         },
         runFormFillDraft: async () => {

@@ -12,10 +12,14 @@ const envSchema = z.object({
   BROWSER_USE_API_KEY: z.string().min(1, "BROWSER_USE_API_KEY is required"),
   BROWSER_USE_PROFILE_ID: z.string().optional(),
   OPENROUTER_API_KEY: z.string().min(1, "OPENROUTER_API_KEY is required"),
+  OPENROUTER_MODELS: z.string().default("openrouter/free"),
+  OPENROUTER_TIMEOUT_MS: z.coerce.number().default(4500),
   SUPABASE_URL: z.string().url("SUPABASE_URL must be a valid URL").optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   NAVIGATION_ALLOWLIST: z.string().default("google.com,bing.com,duckduckgo.com"),
   ALLOW_FINAL_FORM_SUBMISSION: z.coerce.boolean().default(false),
+  MURMUR_ENABLE_LLM_TOOL_GUIDE: z.coerce.boolean().default(false),
+  MURMUR_ENABLE_OUTPUT_REFINEMENT: z.coerce.boolean().default(false),
   // Optional: when set, Tavily is used for quick-answer web searches
   // (current events, weather, prices, etc.) instead of falling back to browser_use.
   TAVILY_API_KEY: z.string().optional(),
