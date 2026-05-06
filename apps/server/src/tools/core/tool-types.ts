@@ -1,3 +1,5 @@
+import type { BrowserViewUpdate } from "../browser/adapter.js";
+
 export type RiskClass = "read_only" | "draft_write" | "restricted";
 
 export interface ToolDefinition {
@@ -13,6 +15,7 @@ export interface ToolContext {
   readonly query: string;
   readonly browserApiKey: string;
   readonly onStatus: (message: string) => void;
+  readonly onBrowserView?: (update: BrowserViewUpdate) => void;
   readonly signal?: AbortSignal;
 }
 

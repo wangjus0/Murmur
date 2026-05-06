@@ -13,6 +13,7 @@ import {
   rankSkillsForTool,
   shouldFallbackFromProfileSessionError,
 } from "../../apps/server/src/tools/browser/adapter.ts";
+import type { BrowserViewUpdate } from "../../apps/server/src/tools/browser/adapter.ts";
 
 test("search task prompt stays focused on read-only retrieval", () => {
   const prompt = buildSearchTaskPrompt("best tacos in san jose");
@@ -263,6 +264,66 @@ test("v3 runSearch session body never contains skillIds or systemPromptExtension
     assert.equal(capturedBody?.systemPromptExtension, undefined);
     assert.equal(capturedBody?.session_id, undefined);
     assert.equal(capturedBody?.sessionId, undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("v3 runSearch emits live browser view URLs from session create and poll", async () => {
+  const originalFetch = globalThis.fetch;
+  const browserViewUpdates: BrowserViewUpdate[] = [];
+
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = (init?.method ?? "GET").toUpperCase();
+
+    if (method === "POST" && url.includes("/sessions")) {
+      return new Response(
+        JSON.stringify({
+          id: "sess_v3_live",
+          liveUrl: "https://live.browser-use.com/sess_v3_live",
+          screenshotUrl: "https://api.browser-use.com/sess_v3_live/screenshot.png",
+        }),
+        { status: 200 }
+      );
+    }
+
+    if (method === "GET" && url.includes("/sessions/sess_v3_live")) {
+      return new Response(
+        JSON.stringify({
+          status: "stopped",
+          output: "Task complete with live preview.",
+          liveUrl: "https://live.browser-use.com/sess_v3_live",
+          screenshotUrl: "https://api.browser-use.com/sess_v3_live/screenshot.png",
+          stepCount: 2,
+          lastStepSummary: "Submitted visible form fields",
+          isTaskSuccessful: true,
+        }),
+        { status: 200 }
+      );
+    }
+
+    if (method === "DELETE") {
+      return new Response(null, { status: 200 });
+    }
+
+    throw new Error(`Unexpected fetch call: ${method} ${url}`);
+  }) as typeof fetch;
+
+  try {
+    const adapter = new BrowserAdapter("bu_test_integration_key");
+    const output = await adapter.runSearch("fill out a demo form", {
+      onStatus: () => {},
+      onBrowserView: (update) => browserViewUpdates.push(update),
+    });
+
+    assert.equal(output, "Task complete with live preview.");
+    assert.equal(browserViewUpdates.length, 2);
+    assert.deepEqual(browserViewUpdates.map((update) => update.status), ["created", "stopped"]);
+    assert.equal(browserViewUpdates[0]?.liveUrl, "https://live.browser-use.com/sess_v3_live");
+    assert.equal(browserViewUpdates[1]?.stepCount, 2);
+    assert.equal(browserViewUpdates[1]?.lastStepSummary, "Submitted visible form fields");
+    assert.equal(browserViewUpdates[1]?.isTaskSuccessful, true);
   } finally {
     globalThis.fetch = originalFetch;
   }

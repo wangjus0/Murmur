@@ -236,6 +236,14 @@ test("final transcript flows through intent, browser action, narration, and done
         runSearch: async (query, callbacks) => {
           browserCalls.push(query);
           callbacks.onStatus("Opened search results");
+          callbacks.onBrowserView?.({
+            sessionId: "sess_live_preview",
+            status: "running",
+            liveUrl: "https://live.browser-use.com/sess_live_preview",
+            stepCount: 1,
+            lastStepSummary: "Opened search results",
+            isTaskSuccessful: null,
+          });
           return "I navigated to search results.\n1. Demo Project - https://example.com/demo";
         },
         runFormFillDraft: async () => {
@@ -270,7 +278,7 @@ test("final transcript flows through intent, browser action, narration, and done
 
   assert.deepEqual(
     session.events.map((event) => event.type),
-    ["intent", "action_status", "action_status", "narration_text", "done"]
+    ["intent", "action_status", "action_status", "browser_view", "narration_text", "done"]
   );
 
   const actionStatuses = session.events.filter(
@@ -280,6 +288,13 @@ test("final transcript flows through intent, browser action, narration, and done
   assert.equal(actionStatuses.length, 2);
   assert.equal(actionStatuses[0].message, "Fallback — using browser automation.");
   assert.equal(actionStatuses[1].message, "Opened search results");
+
+  const browserViews = session.events.filter(
+    (event): event is Extract<ServerEvent, { type: "browser_view" }> =>
+      event.type === "browser_view"
+  );
+  assert.equal(browserViews.length, 1);
+  assert.equal(browserViews[0].liveUrl, "https://live.browser-use.com/sess_live_preview");
 });
 
 test("non-native selected tool emits fallback status and uses browser path", async () => {

@@ -73,6 +73,18 @@ export const actionStatusPayloadSchema = z
   })
   .strict();
 
+export const browserViewPayloadSchema = z
+  .object({
+    sessionId: z.string().min(1),
+    status: z.string().min(1),
+    liveUrl: z.string().url().optional(),
+    screenshotUrl: z.string().url().optional(),
+    stepCount: z.number().int().min(0).optional(),
+    lastStepSummary: z.string().optional(),
+    isTaskSuccessful: z.boolean().nullable().optional(),
+  })
+  .strict();
+
 export const narrationTextPayloadSchema = z
   .object({
     text: z.string().min(1),
@@ -155,6 +167,14 @@ export const actionStatusMessageSchema = z
   })
   .strict();
 
+export const browserViewMessageSchema = z
+  .object({
+    type: z.literal("browser_view"),
+    payload: browserViewPayloadSchema,
+    ...baseMessageShape,
+  })
+  .strict();
+
 export const narrationTextMessageSchema = z
   .object({
     type: z.literal("narration_text"),
@@ -194,6 +214,7 @@ export const serverToClientMessageSchema = z.discriminatedUnion("type", [
   transcriptFinalMessageSchema,
   intentMessageSchema,
   actionStatusMessageSchema,
+  browserViewMessageSchema,
   narrationTextMessageSchema,
   narrationAudioMessageSchema,
   doneMessageSchema,
@@ -212,6 +233,7 @@ export type TranscriptFinalPayloadInput = z.infer<
 >;
 export type IntentPayloadInput = z.infer<typeof intentPayloadSchema>;
 export type ActionStatusPayloadInput = z.infer<typeof actionStatusPayloadSchema>;
+export type BrowserViewPayloadInput = z.infer<typeof browserViewPayloadSchema>;
 export type NarrationTextPayloadInput = z.infer<typeof narrationTextPayloadSchema>;
 export type NarrationAudioPayloadInput = z.infer<
   typeof narrationAudioPayloadSchema
@@ -231,6 +253,7 @@ export type TranscriptFinalMessageInput = z.infer<
 >;
 export type IntentMessageInput = z.infer<typeof intentMessageSchema>;
 export type ActionStatusMessageInput = z.infer<typeof actionStatusMessageSchema>;
+export type BrowserViewMessageInput = z.infer<typeof browserViewMessageSchema>;
 export type NarrationTextMessageInput = z.infer<typeof narrationTextMessageSchema>;
 export type NarrationAudioMessageInput = z.infer<
   typeof narrationAudioMessageSchema

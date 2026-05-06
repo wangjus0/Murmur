@@ -23,6 +23,7 @@ export type {
   ActionStatusPayload,
   AudioChunkPayload,
   AudioEndPayload,
+  BrowserViewPayload,
   ClientToServerPayloadMap,
   DonePayload,
   ErrorPayload,
@@ -60,6 +61,8 @@ export {
 export {
   actionStatusMessageSchema,
   actionStatusPayloadSchema,
+  browserViewMessageSchema,
+  browserViewPayloadSchema,
   doneMessageSchema,
   donePayloadSchema,
   errorMessageSchema,
@@ -96,6 +99,8 @@ export type {
 export type {
   ActionStatusMessageInput,
   ActionStatusPayloadInput,
+  BrowserViewMessageInput,
+  BrowserViewPayloadInput,
   DoneMessageInput,
   DonePayloadInput,
   ErrorMessageInput,
