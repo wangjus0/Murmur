@@ -427,6 +427,60 @@ test("read-only search uses fast Tavily path and skips Browser Use/refinement", 
   assert.deepEqual(narratedTexts, ["Top result: Demo Project - https://example.com/demo"]);
 });
 
+test("read-only search falls back to Browser Use when Tavily is unavailable", async () => {
+  const session = new FakeSession();
+  const browserCalls: string[] = [];
+  const narratedTexts: string[] = [];
+  let fastSearchCalls = 0;
+  let refineCalls = 0;
+
+  await handleTranscriptFinal(
+    session,
+    {} as GoogleGenAI,
+    "elevenlabs-test-key",
+    "search for Murmur demo projects",
+    undefined,
+    {
+      classifyIntent: async () => ({
+        intent: "search",
+        confidence: 0.95,
+        query: "search for Murmur demo projects",
+      }),
+      createBrowserAdapter: () => ({
+        runSearch: async (query, callbacks) => {
+          browserCalls.push(query);
+          callbacks.onStatus("Opened search results");
+          return "I navigated to search results.\n1. Demo Project - https://example.com/demo";
+        },
+        runFormFillDraft: async () => {
+          throw new Error("Unexpected form fill path");
+        },
+      }),
+      fastSearch: async () => {
+        fastSearchCalls += 1;
+        return null;
+      },
+      refineOutput: async () => {
+        refineCalls += 1;
+        return { displayText: "unexpected", spokenSummary: "unexpected" };
+      },
+      narrate: async (narrationSession, text) => {
+        narratedTexts.push(text);
+        narrationSession.send({ type: "narration_text", text });
+      },
+      tavilyApiKey: "",
+      enableOutputRefinement: false,
+      browserApiKey: "browser-use-test-key",
+    }
+  );
+
+  assert.equal(fastSearchCalls, 0);
+  assert.deepEqual(browserCalls, ["search for Murmur demo projects"]);
+  assert.equal(refineCalls, 0);
+  assert.deepEqual(session.states, ["thinking", "acting", "speaking", "idle"]);
+  assert.deepEqual(narratedTexts, ["1. Demo Project - https://example.com/demo"]);
+});
+
 test("deterministic integration routing skips LLM tool guide and uses browser integration path", async () => {
   const session = new FakeSession();
   const browserCalls: string[] = [];

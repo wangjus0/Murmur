@@ -1433,26 +1433,11 @@ export async function handleTranscriptFinal(
 
     const useFastSearchRoute =
       !integrationOptions.preferredToolId &&
+      deps.tavilyApiKey.length > 0 &&
       isReadOnlyFastSearchRequest(result.intent, resolvedText);
     logDuration("routing", routingStartMs);
 
     if (useFastSearchRoute) {
-      if (!deps.tavilyApiKey) {
-        const answer =
-          "Fast web search is not configured yet. Ask me to open a specific site if you want me to browse.";
-        session.setState("speaking");
-        await narrateResponse(answer, answer);
-        if (history) {
-          history.recentTurns.push({ transcript: text, response: answer });
-          maybeCompactHistory(ai, history).catch((err) =>
-            console.error("[Orchestrator] Background compaction error (fast_search_unavailable):", err)
-          );
-        }
-        session.setState("idle");
-        session.send({ type: "done" });
-        return;
-      }
-
       session.setState("acting");
       session.send({ type: "action_status", message: "Searching the web..." });
       const toolStartMs = Date.now();
