@@ -74,6 +74,56 @@ test("quick arithmetic answer does not call OpenRouter or Browser Use", async ()
   );
 });
 
+test("quick arithmetic answer handles precedence without OpenRouter or Browser Use", async () => {
+  const session = new FakeSession();
+  const narratedTexts: string[] = [];
+  let aiCalls = 0;
+  let browserCalls = 0;
+
+  const ai = {
+    models: {
+      generateContent: async () => {
+        aiCalls += 1;
+        throw new Error("OpenRouter should not be called for local arithmetic");
+      },
+    },
+  } as unknown as GoogleGenAI;
+
+  await handleTranscriptFinal(
+    session,
+    ai,
+    "elevenlabs-test-key",
+    "What is three plus three times two?",
+    undefined,
+    {
+      createBrowserAdapter: () => ({
+        runSearch: async () => {
+          browserCalls += 1;
+          return "unexpected";
+        },
+        runFormFillDraft: async () => {
+          browserCalls += 1;
+          return "unexpected";
+        },
+      }),
+      narrate: async (narrationSession, text) => {
+        narratedTexts.push(text);
+        narrationSession.send({ type: "narration_text", text });
+      },
+      browserApiKey: "browser-use-test-key",
+    }
+  );
+
+  assert.equal(aiCalls, 0);
+  assert.equal(browserCalls, 0);
+  assert.deepEqual(session.states, ["thinking", "speaking", "idle"]);
+  assert.deepEqual(narratedTexts, ["The answer is 9."]);
+  assert.deepEqual(
+    session.events.map((event) => event.type),
+    ["intent", "narration_text", "done"]
+  );
+});
+
 test("general quick answer uses one OpenRouter call and no browser path", async () => {
   const session = new FakeSession();
   const narratedTexts: string[] = [];
@@ -120,6 +170,274 @@ test("general quick answer uses one OpenRouter call and no browser path", async 
   assert.deepEqual(narratedTexts, ["Paris is the capital of France."]);
 });
 
+test("general quick answer unwraps numeric JSON answer values", async () => {
+  const session = new FakeSession();
+  const narratedTexts: string[] = [];
+  let aiCalls = 0;
+  let browserCalls = 0;
+
+  const ai = {
+    models: {
+      generateContent: async () => {
+        aiCalls += 1;
+        return { text: JSON.stringify({ answer: 6 }) };
+      },
+    },
+  } as unknown as GoogleGenAI;
+
+  await handleTranscriptFinal(
+    session,
+    ai,
+    "elevenlabs-test-key",
+    "what is the atomic number of carbon?",
+    undefined,
+    {
+      createBrowserAdapter: () => ({
+        runSearch: async () => {
+          browserCalls += 1;
+          return "unexpected";
+        },
+        runFormFillDraft: async () => {
+          browserCalls += 1;
+          return "unexpected";
+        },
+      }),
+      narrate: async (narrationSession, text) => {
+        narratedTexts.push(text);
+        narrationSession.send({ type: "narration_text", text });
+      },
+      browserApiKey: "browser-use-test-key",
+    }
+  );
+
+  assert.equal(aiCalls, 1);
+  assert.equal(browserCalls, 0);
+  assert.deepEqual(session.states, ["thinking", "speaking", "idle"]);
+  assert.deepEqual(narratedTexts, ["The answer is 6."]);
+  assert.deepEqual(
+    session.events.map((event) => event.type),
+    ["intent", "narration_text", "done"]
+  );
+});
+
+test("general quick answer retries plain text for unsupported JSON answer values", async () => {
+  const session = new FakeSession();
+  const narratedTexts: string[] = [];
+  let aiCalls = 0;
+  let browserCalls = 0;
+
+  const ai = {
+    models: {
+      generateContent: async (params: { config?: { responseMimeType?: string } }) => {
+        aiCalls += 1;
+        if (aiCalls === 1) {
+          assert.equal(params.config?.responseMimeType, "application/json");
+          return { text: JSON.stringify({ answer: { value: 6 } }) };
+        }
+
+        assert.equal(params.config?.responseMimeType, undefined);
+        return { text: "The answer is 6." };
+      },
+    },
+  } as unknown as GoogleGenAI;
+
+  await handleTranscriptFinal(
+    session,
+    ai,
+    "elevenlabs-test-key",
+    "what is the atomic number of carbon?",
+    undefined,
+    {
+      createBrowserAdapter: () => ({
+        runSearch: async () => {
+          browserCalls += 1;
+          return "unexpected";
+        },
+        runFormFillDraft: async () => {
+          browserCalls += 1;
+          return "unexpected";
+        },
+      }),
+      narrate: async (narrationSession, text) => {
+        narratedTexts.push(text);
+        narrationSession.send({ type: "narration_text", text });
+      },
+      browserApiKey: "browser-use-test-key",
+    }
+  );
+
+  assert.equal(aiCalls, 2);
+  assert.equal(browserCalls, 0);
+  assert.deepEqual(session.states, ["thinking", "speaking", "idle"]);
+  assert.deepEqual(narratedTexts, ["The answer is 6."]);
+  assert.deepEqual(
+    session.events.map((event) => event.type),
+    ["intent", "narration_text", "done"]
+  );
+});
+
+test("general quick answer falls back to plain text generation without browser path", async () => {
+  const session = new FakeSession();
+  const narratedTexts: string[] = [];
+  let aiCalls = 0;
+  let browserCalls = 0;
+
+  const ai = {
+    models: {
+      generateContent: async (params: { config?: { responseMimeType?: string } }) => {
+        aiCalls += 1;
+        if (aiCalls === 1) {
+          assert.equal(params.config?.responseMimeType, "application/json");
+          throw new Error("OpenRouter 400: response_format json_object is not supported");
+        }
+
+        assert.equal(params.config?.responseMimeType, undefined);
+        return { text: "Paris is the capital of France." };
+      },
+    },
+  } as unknown as GoogleGenAI;
+
+  await handleTranscriptFinal(
+    session,
+    ai,
+    "elevenlabs-test-key",
+    "what is the capital of France?",
+    undefined,
+    {
+      createBrowserAdapter: () => ({
+        runSearch: async () => {
+          browserCalls += 1;
+          return "unexpected";
+        },
+        runFormFillDraft: async () => {
+          browserCalls += 1;
+          return "unexpected";
+        },
+      }),
+      narrate: async (narrationSession, text) => {
+        narratedTexts.push(text);
+        narrationSession.send({ type: "narration_text", text });
+      },
+      browserApiKey: "browser-use-test-key",
+    }
+  );
+
+  assert.equal(aiCalls, 2);
+  assert.equal(browserCalls, 0);
+  assert.deepEqual(session.states, ["thinking", "speaking", "idle"]);
+  assert.deepEqual(narratedTexts, ["Paris is the capital of France."]);
+  assert.deepEqual(
+    session.events.map((event) => event.type),
+    ["intent", "narration_text", "done"]
+  );
+});
+
+test("general quick answer accepts fenced JSON model output", async () => {
+  const session = new FakeSession();
+  const narratedTexts: string[] = [];
+  let aiCalls = 0;
+  let browserCalls = 0;
+
+  const ai = {
+    models: {
+      generateContent: async () => {
+        aiCalls += 1;
+        return {
+          text: "```json\n{\"answer\":\"Paris is the capital of France.\"}\n```",
+        };
+      },
+    },
+  } as unknown as GoogleGenAI;
+
+  await handleTranscriptFinal(
+    session,
+    ai,
+    "elevenlabs-test-key",
+    "what is the capital of France?",
+    undefined,
+    {
+      createBrowserAdapter: () => ({
+        runSearch: async () => {
+          browserCalls += 1;
+          return "unexpected";
+        },
+        runFormFillDraft: async () => {
+          browserCalls += 1;
+          return "unexpected";
+        },
+      }),
+      narrate: async (narrationSession, text) => {
+        narratedTexts.push(text);
+        narrationSession.send({ type: "narration_text", text });
+      },
+      browserApiKey: "browser-use-test-key",
+    }
+  );
+
+  assert.equal(aiCalls, 1);
+  assert.equal(browserCalls, 0);
+  assert.deepEqual(narratedTexts, ["Paris is the capital of France."]);
+});
+
+test("advice question uses quick answer and skips Browser Use without Tavily", async () => {
+  const session = new FakeSession();
+  const narratedTexts: string[] = [];
+  let aiCalls = 0;
+  let browserCalls = 0;
+  let fastSearchCalls = 0;
+
+  const ai = {
+    models: {
+      generateContent: async () => {
+        aiCalls += 1;
+        return {
+          text: JSON.stringify({
+            answer: "Keep shared database types centralized and isolate Supabase calls behind typed helpers.",
+          }),
+        };
+      },
+    },
+  } as unknown as GoogleGenAI;
+
+  await handleTranscriptFinal(
+    session,
+    ai,
+    "elevenlabs-test-key",
+    "How should I structure a TypeScript Supabase project?",
+    undefined,
+    {
+      createBrowserAdapter: () => ({
+        runSearch: async () => {
+          browserCalls += 1;
+          return "unexpected";
+        },
+        runFormFillDraft: async () => {
+          browserCalls += 1;
+          return "unexpected";
+        },
+      }),
+      fastSearch: async () => {
+        fastSearchCalls += 1;
+        return null;
+      },
+      narrate: async (narrationSession, text) => {
+        narratedTexts.push(text);
+        narrationSession.send({ type: "narration_text", text });
+      },
+      tavilyApiKey: "",
+      browserApiKey: "browser-use-test-key",
+    }
+  );
+
+  assert.equal(aiCalls, 1);
+  assert.equal(fastSearchCalls, 0);
+  assert.equal(browserCalls, 0);
+  assert.deepEqual(session.states, ["thinking", "speaking", "idle"]);
+  assert.deepEqual(narratedTexts, [
+    "Keep shared database types centralized and isolate Supabase calls behind typed helpers.",
+  ]);
+});
+
 test("general quick answer rate limit returns fallback without browser path", async () => {
   const session = new FakeSession();
   const narratedTexts: string[] = [];
@@ -160,12 +478,16 @@ test("general quick answer rate limit returns fallback without browser path", as
     }
   );
 
-  assert.equal(aiCalls, 1);
+  assert.equal(aiCalls, 2);
   assert.equal(browserCalls, 0);
   assert.deepEqual(session.states, ["thinking", "speaking", "idle"]);
   assert.deepEqual(narratedTexts, [
-    "The quick-answer model is temporarily unavailable. Please try again in a moment.",
+    "I'm having trouble generating that answer right now. Please try again in a moment.",
   ]);
+  assert.deepEqual(
+    session.events.map((event) => event.type),
+    ["intent", "narration_text", "done"]
+  );
 });
 
 test("conversational acknowledgement stays local and skips tool routing", async () => {

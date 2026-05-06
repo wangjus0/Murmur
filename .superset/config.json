@@ -1,7 +1,9 @@
 {
   "setup": [
-    "npm i"
+    "npm run worktree:setup"
   ],
-  "teardown": [],
+  "teardown": [
+    "npm run worktree:cleanup"
+  ],
   "run": []
 }
