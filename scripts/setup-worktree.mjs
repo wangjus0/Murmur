@@ -147,7 +147,8 @@ function copyServerEnv() {
     return;
   }
 
-  if (fileExists(targetEnv) && !args.has("--overwrite-env")) {
+  const targetExisted = fileExists(targetEnv);
+  if (targetExisted && !args.has("--overwrite-env")) {
     log(`${serverEnvRel} already exists; leaving it unchanged.`);
     return;
   }
@@ -160,7 +161,9 @@ function copyServerEnv() {
     // Best-effort permissions hardening for local secret files.
   }
 
-  state.createdFiles.push(safeRelative(targetEnv));
+  if (!targetExisted) {
+    state.createdFiles.push(safeRelative(targetEnv));
+  }
   log(`Copied ${serverEnvRel} from another worktree.`);
 }
 
@@ -210,4 +213,5 @@ copyServerEnv();
 clearRuntimeFiles();
 writeState();
 installDependencies();
+writeState();
 log("Worktree setup complete.");

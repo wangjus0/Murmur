@@ -514,18 +514,99 @@ async function synthesizeTavilyAnswer(
 }
 
 const QUICK_ANSWER_UNAVAILABLE =
-  "The quick-answer model is temporarily unavailable. Please try again in a moment.";
+  "I'm having trouble generating that answer right now. Please try again in a moment.";
 
 const GENERAL_QUICK_ANSWER_SYSTEM_PROMPT = `Answer the user's general question directly.
 Rules:
 - Keep the answer to 1-2 concise sentences.
 - Do not browse, use tools, or describe your process.
 - If you are not confident, say so briefly.
+- The answer value must be a plain text string, not a number, object, or array.
 
 Respond with JSON only:
 {
   "answer": "the answer"
 }`;
+
+const GENERAL_QUICK_ANSWER_TEXT_PROMPT = `Answer the user's general question directly.
+Rules:
+- Keep the answer to 1-2 concise sentences.
+- Do not browse, use tools, or describe your process.
+- If you are not confident, say so briefly.
+- Respond with plain text only.`;
+
+function unwrapMarkdownCodeFence(text: string): string {
+  const match = text.match(/^```(?:json|text)?\s*\n?([\s\S]*?)\n?```$/i);
+  return match?.[1]?.trim() || text;
+}
+
+function formatQuickAnswerNumber(value: number): string {
+  if (Number.isInteger(value)) {
+    return String(value);
+  }
+
+  return String(Number(value.toFixed(8)));
+}
+
+function normalizeQuickAnswerValue(value: unknown): string | null {
+  if (typeof value === "string") {
+    return normalizeNarrationText(value) || null;
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return `The answer is ${formatQuickAnswerNumber(value)}.`;
+  }
+
+  if (typeof value === "boolean") {
+    return value ? "Yes." : "No.";
+  }
+
+  return null;
+}
+
+function parseQuickAnswerResponse(responseText: string): string | null {
+  const trimmed = responseText.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const unwrapped = unwrapMarkdownCodeFence(trimmed);
+  const jsonCandidates = [
+    trimmed,
+    unwrapped,
+    extractFirstJsonObject(trimmed) ?? "",
+  ].filter((candidate, index, values) => candidate && values.indexOf(candidate) === index);
+  let parsedStandaloneJson = false;
+
+  for (const candidate of jsonCandidates) {
+    try {
+      const parsed = JSON.parse(candidate) as unknown;
+      if (candidate === trimmed || candidate === unwrapped) {
+        parsedStandaloneJson = true;
+      }
+
+      const directAnswer = normalizeQuickAnswerValue(parsed);
+      if (directAnswer) {
+        return directAnswer;
+      }
+
+      if (parsed && typeof parsed === "object" && "answer" in parsed) {
+        const objectAnswer = normalizeQuickAnswerValue(parsed.answer);
+        if (objectAnswer) {
+          return objectAnswer;
+        }
+      }
+    } catch {
+      // Fall through to the next candidate, then plain-text normalization.
+    }
+  }
+
+  if (parsedStandaloneJson) {
+    return null;
+  }
+
+  return normalizeNarrationText(unwrapped) || null;
+}
 
 async function generateGeneralQuickAnswer(
   ai: AiClient,
@@ -537,10 +618,12 @@ async function generateGeneralQuickAnswer(
     return QUICK_ANSWER_UNAVAILABLE;
   }
 
+  const contextSection = historyContext
+    ? `[Conversation history]\n${historyContext}\n\n`
+    : "";
+  let lastError: unknown = null;
+
   try {
-    const contextSection = historyContext
-      ? `[Conversation history]\n${historyContext}\n\n`
-      : "";
     const response = await generateContent({
       model: "quick-answer",
       contents:
@@ -550,28 +633,37 @@ async function generateGeneralQuickAnswer(
       config: { responseMimeType: "application/json", maxTokens: 180 },
     });
 
-    const responseText = response.text;
-    if (!responseText) {
-      return QUICK_ANSWER_UNAVAILABLE;
+    const answer = parseQuickAnswerResponse(response.text);
+    if (answer) {
+      return answer;
     }
-
-    try {
-      const parsed = JSON.parse(responseText) as { answer?: unknown };
-      if (typeof parsed.answer === "string" && parsed.answer.trim()) {
-        return normalizeNarrationText(parsed.answer);
-      }
-    } catch {
-      const normalized = normalizeNarrationText(responseText);
-      if (normalized) {
-        return normalized;
-      }
-    }
-
-    return QUICK_ANSWER_UNAVAILABLE;
   } catch (err) {
-    console.warn("[Orchestrator] Quick answer generation failed:", err);
-    return QUICK_ANSWER_UNAVAILABLE;
+    lastError = err;
   }
+
+  try {
+    const response = await generateContent({
+      model: "quick-answer",
+      contents:
+        `${GENERAL_QUICK_ANSWER_TEXT_PROMPT}\n\n` +
+        `${contextSection}` +
+        `User asked: "${userRequest}"`,
+      config: { maxTokens: 180 },
+    });
+
+    const answer = parseQuickAnswerResponse(response.text);
+    if (answer) {
+      return answer;
+    }
+  } catch (err) {
+    lastError = err;
+  }
+
+  if (lastError) {
+    const errorMessage = lastError instanceof Error ? lastError.message : String(lastError);
+    console.warn("[Orchestrator] Quick answer generation failed; using fallback:", errorMessage);
+  }
+  return QUICK_ANSWER_UNAVAILABLE;
 }
 
 const BROWSER_QUERY_REFINEMENT_SYSTEM_PROMPT = `You compress a user request into a short Browser Use task query.
@@ -1181,6 +1273,23 @@ const PRIVATE_CONTEXT_PATTERN =
   /\b(i|me|my|mine|our|ours|we|team|workspace|account)\b/i;
 const INTEGRATION_TOPIC_PATTERN =
   /\b(agenda|calendar|schedule|meeting|meetings|appointment|appointments|event|events|email|emails|inbox|unread|message|messages|dm|dms|file|files|drive|document|documents|doc|docs|sheet|sheets|spreadsheet|spreadsheets|note|notes|database|repo|repos|repository|repositories|pull request|pull requests|pr|prs|issue|issues|ticket|tickets|invoice|invoices|payment|payments|customer|customers|contact|contacts|deal|deals)\b/i;
+const LIVE_INTEGRATION_LOOKUP_PATTERNS: Partial<Record<ToolId, RegExp>> = {
+  gmail: /\b(email|emails|inbox|unread|message|messages|thread|threads)\b/i,
+  outlook: /\b(email|emails|inbox|unread|message|messages|thread|threads)\b/i,
+  google_calendar: /\b(agenda|calendar|schedule|meeting|meetings|appointment|appointments|event|events)\b/i,
+  slack: /\b(slack|message|messages|channel|channels|dm|dms)\b/i,
+  discord: /\b(discord|message|messages|channel|channels|dm|dms)\b/i,
+  google_drive: /\b(file|files|folder|folders|drive|document|documents|doc|docs)\b/i,
+  google_docs: /\b(document|documents|doc|docs)\b/i,
+  google_sheets: /\b(sheet|sheets|spreadsheet|spreadsheets)\b/i,
+  notion: /\b(note|notes|page|pages|database|databases)\b/i,
+  github: /\b(repo|repos|repository|repositories|pull request|pull requests|pr|prs|issue|issues|commit|commits|branch|branches)\b/i,
+  jira: /\b(ticket|tickets|issue|issues|project|projects)\b/i,
+  linear: /\b(ticket|tickets|issue|issues|project|projects)\b/i,
+  hubspot: /\b(contact|contacts|deal|deals|lead|leads|company|companies)\b/i,
+  salesforce: /\b(contact|contacts|deal|deals|lead|leads|account|accounts|opportunity|opportunities)\b/i,
+  stripe: /\b(invoice|invoices|payment|payments|charge|charges|customer|customers)\b/i,
+};
 
 function isReadOnlyFastSearchRequest(
   intent: IntentResult["intent"],
@@ -1198,6 +1307,30 @@ function isPotentialPrivateIntegrationRequest(
     PRIVATE_CONTEXT_PATTERN.test(userRequest) &&
     INTEGRATION_TOPIC_PATTERN.test(userRequest)
   );
+}
+
+function shouldRouteDetectedIntegrationTool(
+  toolId: ToolId | null,
+  classified: IntentResult,
+  userRequest: string
+): toolId is ToolId {
+  if (!toolId) {
+    return false;
+  }
+
+  if (classified.intent !== "quick_answer") {
+    return true;
+  }
+
+  if (isPotentialPrivateIntegrationRequest(classified.intent, userRequest)) {
+    return true;
+  }
+
+  if (classified.needs_web_search === true) {
+    return LIVE_INTEGRATION_LOOKUP_PATTERNS[toolId]?.test(userRequest) ?? false;
+  }
+
+  return false;
 }
 
 function buildIntegrationOptionsFromTool(
@@ -1340,8 +1473,15 @@ export async function handleTranscriptFinal(
       classified.intent,
       resolvedText
     );
+    const detectedToolForRouting = shouldRouteDetectedIntegrationTool(
+      detectedTool,
+      classified,
+      resolvedText
+    )
+      ? detectedTool
+      : null;
     const result: IntentResult =
-      (detectedTool || shouldPreserveIntegrationRouting) &&
+      (detectedToolForRouting || shouldPreserveIntegrationRouting) &&
       classified.intent === "quick_answer"
         ? {
             ...classified,
@@ -1421,7 +1561,7 @@ export async function handleTranscriptFinal(
 
     const routingStartMs = Date.now();
     const needsToolPlan =
-      !detectedTool &&
+      !detectedToolForRouting &&
       (deps.enableLlmToolGuide || shouldPreserveIntegrationRouting) &&
       result.intent !== "web_extract" &&
       result.intent !== "multi_site_compare";
@@ -1445,8 +1585,8 @@ export async function handleTranscriptFinal(
       integrationInstruction?: string;
     } = {};
 
-    const deterministicIntegrationOptions = detectedTool
-      ? buildIntegrationOptionsFromTool(detectedTool, resolvedText, "deterministic keyword match")
+    const deterministicIntegrationOptions = detectedToolForRouting
+      ? buildIntegrationOptionsFromTool(detectedToolForRouting, resolvedText, "deterministic keyword match")
       : null;
     if (deterministicIntegrationOptions) {
       integrationOptions = deterministicIntegrationOptions;
