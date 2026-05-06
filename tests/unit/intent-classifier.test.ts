@@ -29,6 +29,23 @@ test("classifyIntent answers simple arithmetic without OpenRouter", async () => 
   });
 });
 
+test("classifyIntent answers multi-operator arithmetic with precedence locally", async () => {
+  let calls = 0;
+  const result = await classifyIntent(
+    createFailingAi(() => { calls += 1; }),
+    "What is three plus three times two?"
+  );
+
+  assert.equal(calls, 0);
+  assert.deepEqual(result, {
+    intent: "quick_answer",
+    confidence: 0.95,
+    query: "What is three plus three times two?",
+    answer: "The answer is 9.",
+    needs_web_search: false,
+  });
+});
+
 test("classifyIntent routes live lookups to quick web search without OpenRouter", async () => {
   let calls = 0;
   const result = await classifyIntent(
@@ -58,6 +75,84 @@ test("classifyIntent routes general knowledge questions to quick answer", async 
     confidence: 0.72,
     query: "what is the capital of France?",
     needs_web_search: false,
+  });
+});
+
+test("classifyIntent routes URL definition questions to quick answer", async () => {
+  let calls = 0;
+  const result = await classifyIntent(
+    createFailingAi(() => { calls += 1; }),
+    "what is a URL?"
+  );
+
+  assert.equal(calls, 0);
+  assert.deepEqual(result, {
+    intent: "quick_answer",
+    confidence: 0.72,
+    query: "what is a URL?",
+    needs_web_search: false,
+  });
+});
+
+test("classifyIntent routes advice questions to quick answer", async () => {
+  let calls = 0;
+  const result = await classifyIntent(
+    createFailingAi(() => { calls += 1; }),
+    "How should I structure a TypeScript Supabase project?"
+  );
+
+  assert.equal(calls, 0);
+  assert.deepEqual(result, {
+    intent: "quick_answer",
+    confidence: 0.72,
+    query: "How should I structure a TypeScript Supabase project?",
+    needs_web_search: false,
+  });
+});
+
+test("classifyIntent routes general comparisons to quick answer", async () => {
+  let calls = 0;
+  const result = await classifyIntent(
+    createFailingAi(() => { calls += 1; }),
+    "Compare React and Vue for a beginner project"
+  );
+
+  assert.equal(calls, 0);
+  assert.deepEqual(result, {
+    intent: "quick_answer",
+    confidence: 0.72,
+    query: "Compare React and Vue for a beginner project",
+    needs_web_search: false,
+  });
+});
+
+test("classifyIntent keeps explicit web retrieval on search path", async () => {
+  let calls = 0;
+  const result = await classifyIntent(
+    createFailingAi(() => { calls += 1; }),
+    "search for Murmur demo projects"
+  );
+
+  assert.equal(calls, 0);
+  assert.deepEqual(result, {
+    intent: "search",
+    confidence: 0.72,
+    query: "search for Murmur demo projects",
+  });
+});
+
+test("classifyIntent keeps browser actions on search path", async () => {
+  let calls = 0;
+  const result = await classifyIntent(
+    createFailingAi(() => { calls += 1; }),
+    "Can you open google.com and search for Murmur demo projects?"
+  );
+
+  assert.equal(calls, 0);
+  assert.deepEqual(result, {
+    intent: "search",
+    confidence: 0.72,
+    query: "Can you open google.com and search for Murmur demo projects?",
   });
 });
 

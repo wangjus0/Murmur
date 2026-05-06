@@ -1,0 +1,14 @@
+version = 1
+name = "Murmur"
+
+[setup]
+script = '''
+set -e
+npm run worktree:setup
+'''
+
+[cleanup]
+script = '''
+set -e
+npm run worktree:cleanup
+'''

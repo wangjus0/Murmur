@@ -88,7 +88,7 @@ export const useSessionStore = create<SessionState>((set) => ({
   setTurnState: (turnState) => set({ turnState }),
   setTranscriptPartial: (text) => set({ transcriptPartial: text }),
   addTranscriptFinal: (text) =>
-    set((s) => ({ transcriptFinals: [...s.transcriptFinals, text] })),
+    set((s) => ({ transcriptFinals: [...s.transcriptFinals, text], error: null })),
   addActionTimelineItem: (entry) =>
     set((s) => {
       const nextTimeline = [
@@ -106,7 +106,7 @@ export const useSessionStore = create<SessionState>((set) => ({
     }),
   clearActionTimeline: () => set({ actionTimeline: [] }),
   setIntent: (intent) => set({ intent }),
-  setNarrationText: (text) => set({ narrationText: text }),
+  setNarrationText: (text) => set({ narrationText: text, error: null }),
   addActionStatus: (message) =>
     set((s) => ({ actionStatuses: [...s.actionStatuses, message] })),
   clearActionStatuses: () => set({ actionStatuses: [] }),
