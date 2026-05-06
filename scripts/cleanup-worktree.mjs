@@ -36,9 +36,10 @@ function resolveRepoRoot() {
 
 function safePath(relativePath) {
   const absolutePath = path.resolve(repoRoot, relativePath);
-  const repoRootWithSep = `${path.resolve(repoRoot)}${path.sep}`;
-  if (absolutePath !== path.resolve(repoRoot) && !absolutePath.startsWith(repoRootWithSep)) {
-    throw new Error(`Refusing to remove outside repo root: ${relativePath}`);
+  const resolvedRepoRoot = path.resolve(repoRoot);
+  const repoRootWithSep = `${resolvedRepoRoot}${path.sep}`;
+  if (absolutePath === resolvedRepoRoot || !absolutePath.startsWith(repoRootWithSep)) {
+    throw new Error(`Refusing to remove repo root or outside path: ${relativePath}`);
   }
   return absolutePath;
 }

@@ -1638,10 +1638,14 @@ export async function handleTranscriptFinal(
 
     session.setState("acting");
 
+    const shouldForwardBrowserView =
+      !integrationOptions.forceIntegration || toolPlan?.strategy === "integration_assisted";
     const statusCb = {
       onStatus: (msg: string) => session.send({ type: "action_status", message: msg }),
-      onBrowserView: (view: BrowserViewUpdate) =>
-        session.send({ type: "browser_view", ...view }),
+      onBrowserView: (view: BrowserViewUpdate) => {
+        if (!shouldForwardBrowserView) return;
+        session.send({ type: "browser_view", ...view });
+      },
     };
 
     // Use enhanced prompt from tool guide when available; fall back to context-resolved text.
