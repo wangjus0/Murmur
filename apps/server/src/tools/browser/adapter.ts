@@ -59,6 +59,17 @@ const TOOL_SKILL_TERMS: Record<string, readonly string[]> = {
 
 export interface BrowserTaskCallbacks {
   onStatus: (message: string) => void;
+  onBrowserView?: (update: BrowserViewUpdate) => void;
+}
+
+export interface BrowserViewUpdate {
+  sessionId: string;
+  status: string;
+  liveUrl?: string;
+  screenshotUrl?: string;
+  stepCount?: number;
+  lastStepSummary?: string;
+  isTaskSuccessful?: boolean | null;
 }
 
 export interface BrowserTaskRunOptions {
@@ -182,12 +193,24 @@ export class BrowserAdapter implements BrowserTaskExecutor {
       throw new Error(`Browser Use v3 session create failed (${createRes.status}): ${detail}`);
     }
 
-    const created = (await createRes.json()) as { id: string };
+    const created = (await createRes.json()) as {
+      id: string;
+      liveUrl?: string | null;
+      screenshotUrl?: string | null;
+    };
     if (!created.id) {
       throw new Error("Browser Use v3 session create response missing id");
     }
 
     this.currentSessionId = created.id;
+    const createdLiveUrl = normalizeUrl(created.liveUrl);
+    const createdScreenshotUrl = normalizeUrl(created.screenshotUrl);
+    callbacks.onBrowserView?.({
+      sessionId: created.id,
+      status: "created",
+      ...(createdLiveUrl ? { liveUrl: createdLiveUrl } : {}),
+      ...(createdScreenshotUrl ? { screenshotUrl: createdScreenshotUrl } : {}),
+    });
     callbacks.onStatus(
       options?.forceIntegration
         ? "Integration task started, working..."
@@ -225,6 +248,8 @@ export class BrowserAdapter implements BrowserTaskExecutor {
           isTaskSuccessful?: boolean | null;
           stepCount?: number;
           lastStepSummary?: string | null;
+          liveUrl?: string | null;
+          screenshotUrl?: string | null;
         };
 
         console.log(`[Browser] Poll status=${sessionData.status} steps=${sessionData.stepCount ?? 0} isTaskSuccessful=${sessionData.isTaskSuccessful ?? "null"} outputType=${typeof sessionData.output} outputTruncated=${JSON.stringify(sessionData.output)?.slice(0, 200)}`);
@@ -232,6 +257,19 @@ export class BrowserAdapter implements BrowserTaskExecutor {
         // Surface step progress when available
         const currentStepCount = sessionData.stepCount ?? 0;
         const currentSummary = sessionData.lastStepSummary ?? "";
+        const liveUrl = normalizeUrl(sessionData.liveUrl);
+        const screenshotUrl = normalizeUrl(sessionData.screenshotUrl);
+        if (this.currentSessionId) {
+          callbacks.onBrowserView?.({
+            sessionId: this.currentSessionId,
+            status: sessionData.status,
+            ...(liveUrl ? { liveUrl } : {}),
+            ...(screenshotUrl ? { screenshotUrl } : {}),
+            stepCount: currentStepCount,
+            ...(currentSummary ? { lastStepSummary: currentSummary } : {}),
+            isTaskSuccessful: sessionData.isTaskSuccessful ?? null,
+          });
+        }
         if (currentStepCount > lastStepCount || currentSummary !== lastStepSummary) {
           if (currentSummary && currentSummary !== lastStepSummary) {
             callbacks.onStatus(`Step ${currentStepCount}: ${currentSummary.slice(0, 120)}`);
@@ -382,6 +420,18 @@ function normalizeProfileId(raw: string | null | undefined): string | null {
   }
 
   return trimmed;
+}
+
+function normalizeUrl(raw: string | null | undefined): string | undefined {
+  if (!raw) {
+    return undefined;
+  }
+
+  try {
+    return new URL(raw).toString();
+  } catch {
+    return undefined;
+  }
 }
 
 function normalizeToolId(raw: string | null | undefined): string | null {

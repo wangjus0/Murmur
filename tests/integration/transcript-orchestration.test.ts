@@ -313,6 +313,14 @@ test("browser-required transcript flows through browser action, direct narration
         runSearch: async (query, callbacks) => {
           browserCalls.push(query);
           callbacks.onStatus("Opened search results");
+          callbacks.onBrowserView?.({
+            sessionId: "sess_live_preview",
+            status: "running",
+            liveUrl: "https://live.browser-use.com/sess_live_preview",
+            stepCount: 1,
+            lastStepSummary: "Opened search results",
+            isTaskSuccessful: null,
+          });
           return "I navigated to search results.\n1. Demo Project - https://example.com/demo";
         },
         runFormFillDraft: async () => {
@@ -342,7 +350,7 @@ test("browser-required transcript flows through browser action, direct narration
 
   assert.deepEqual(
     session.events.map((event) => event.type),
-    ["intent", "action_status", "narration_text", "done"]
+    ["intent", "action_status", "browser_view", "narration_text", "done"]
   );
 
   const actionStatuses = session.events.filter(
@@ -351,6 +359,13 @@ test("browser-required transcript flows through browser action, direct narration
   );
   assert.equal(actionStatuses.length, 1);
   assert.equal(actionStatuses[0].message, "Opened search results");
+
+  const browserViews = session.events.filter(
+    (event): event is Extract<ServerEvent, { type: "browser_view" }> =>
+      event.type === "browser_view"
+  );
+  assert.equal(browserViews.length, 1);
+  assert.equal(browserViews[0].liveUrl, "https://live.browser-use.com/sess_live_preview");
 });
 
 test("read-only search uses fast Tavily path and skips Browser Use/refinement", async () => {

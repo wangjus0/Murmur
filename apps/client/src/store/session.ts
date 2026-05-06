@@ -17,6 +17,19 @@ export interface ActionTimelineItem {
   createdAt: number;
 }
 
+export interface BrowserViewState {
+  sessionId: string;
+  status: string;
+  liveUrl: string | null;
+  screenshotUrl: string | null;
+  stepCount: number | null;
+  lastStepSummary: string | null;
+  isTaskSuccessful: boolean | null;
+  updatedAt: number;
+}
+
+export type BrowserViewStoreUpdate = Omit<BrowserViewState, "updatedAt">;
+
 export interface SessionState {
   connected: boolean;
   sessionId: string | null;
@@ -29,6 +42,7 @@ export interface SessionState {
   actionStatuses: string[];
   error: string | null;
   clarificationQuestion: string | null;
+  browserView: BrowserViewState | null;
 
   // Actions
   setConnected: (connected: boolean) => void;
@@ -44,6 +58,8 @@ export interface SessionState {
   clearActionStatuses: () => void;
   setError: (error: string | null) => void;
   setClarificationQuestion: (question: string | null) => void;
+  setBrowserView: (view: BrowserViewStoreUpdate) => void;
+  clearBrowserView: () => void;
   reset: () => void;
 }
 
@@ -59,6 +75,7 @@ const initialState = {
   actionStatuses: [] as string[],
   error: null,
   clarificationQuestion: null as string | null,
+  browserView: null as BrowserViewState | null,
 };
 
 const TIMELINE_MAX_ITEMS = 200;
@@ -95,5 +112,21 @@ export const useSessionStore = create<SessionState>((set) => ({
   clearActionStatuses: () => set({ actionStatuses: [] }),
   setError: (error) => set({ error }),
   setClarificationQuestion: (question) => set({ clarificationQuestion: question }),
+  setBrowserView: (view) =>
+    set((s) => {
+      const previous = s.browserView?.sessionId === view.sessionId ? s.browserView : null;
+      return {
+        browserView: {
+          ...view,
+          liveUrl: view.liveUrl ?? previous?.liveUrl ?? null,
+          screenshotUrl: view.screenshotUrl ?? previous?.screenshotUrl ?? null,
+          stepCount: view.stepCount ?? previous?.stepCount ?? null,
+          lastStepSummary: view.lastStepSummary ?? previous?.lastStepSummary ?? null,
+          isTaskSuccessful: view.isTaskSuccessful ?? previous?.isTaskSuccessful ?? null,
+          updatedAt: Date.now(),
+        },
+      };
+    }),
+  clearBrowserView: () => set({ browserView: null }),
   reset: () => set(initialState),
 }));

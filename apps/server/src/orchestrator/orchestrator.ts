@@ -2,7 +2,7 @@ import type { AiClient } from "../config/ai-client.js";
 import type { IntentResult, ServerEvent } from "@murmur/shared";
 import { env } from "../config/env.js";
 import { tavilySearch, type TavilySearchResult } from "../tools/tavily/tavily-search.js";
-import { BrowserAdapter } from "../tools/browser/adapter.js";
+import { BrowserAdapter, type BrowserViewUpdate } from "../tools/browser/adapter.js";
 import { narrate } from "../voice/narrator.js";
 import {
   createPolicyConfig,
@@ -51,6 +51,7 @@ interface BrowserExecutor {
 
 interface BrowserExecutorCallbacks {
   onStatus: (message: string) => void;
+  onBrowserView?: (update: BrowserViewUpdate) => void;
 }
 
 interface TranscriptFinalLegacyDependencies {
@@ -1483,6 +1484,8 @@ export async function handleTranscriptFinal(
 
     const statusCb = {
       onStatus: (msg: string) => session.send({ type: "action_status", message: msg }),
+      onBrowserView: (view: BrowserViewUpdate) =>
+        session.send({ type: "browser_view", ...view }),
     };
 
     // Use enhanced prompt from tool guide when available; fall back to context-resolved text.
@@ -1501,6 +1504,7 @@ export async function handleTranscriptFinal(
             query: taskQuery,
             browserApiKey: deps.browserApiKey,
             onStatus: statusCb.onStatus,
+            onBrowserView: statusCb.onBrowserView,
           },
           createPolicyConfig(navigationAllowlist, env.ALLOW_FINAL_FORM_SUBMISSION)
         );

@@ -29,7 +29,7 @@ export const multiSiteCompareTool: ToolDefinition = {
     try {
       const output = await browser.runTask(
         buildMultiSiteComparePrompt(ctx.query),
-        { onStatus: ctx.onStatus }
+        { onStatus: ctx.onStatus, onBrowserView: ctx.onBrowserView }
       );
       return { success: true, output };
     } catch (err) {

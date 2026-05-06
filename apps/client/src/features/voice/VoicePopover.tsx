@@ -22,6 +22,8 @@ const WORKING_EXPANDED_WIDTH = 280;
 const WORKING_EXPANDED_HEIGHT = 96;
 const WORKING_NOTCH_WIDTH = 96;
 const WORKING_NOTCH_HEIGHT = 20;
+const BROWSER_PREVIEW_WIDTH = 760;
+const BROWSER_PREVIEW_HEIGHT = 560;
 const REDUCED_MOTION_BAR_SCALE = [0.2, 0.32, 0.48, 0.62, 0.5, 0.62, 0.48, 0.32, 0.2];
 
 export function VoicePopover() {
@@ -33,6 +35,7 @@ export function VoicePopover() {
   const error = useSessionStore((s) => s.error);
   const setError = useSessionStore((s) => s.setError);
   const clarificationQuestion = useSessionStore((s) => s.clarificationQuestion);
+  const browserView = useSessionStore((s) => s.browserView);
   const [barScales, setBarScales] = useState<number[]>(FLAT_SCALE);
   const [workingElapsed, setWorkingElapsed] = useState(0);
   const [workingExpanded, setWorkingExpanded] = useState(false);
@@ -175,6 +178,8 @@ export function VoicePopover() {
   // Show response card when narration text exists and we're speaking or just finished
   const showResponseCard = Boolean(narrationText) && (effectiveState === "speaking" || effectiveState === "idle") && !isRecording;
   const isWorking = effectiveState === "thinking" || effectiveState === "acting";
+  const browserPreviewUrl = browserView?.liveUrl ?? browserView?.screenshotUrl ?? null;
+  const showBrowserPreview = isWorking && workingExpanded && Boolean(browserPreviewUrl);
   const isLiveState = isRecording || effectiveState === "speaking" || isWorking || effectiveState === "listening";
   const pillStateClass = error
     ? "voice-pill-wrapper--error"
@@ -263,6 +268,7 @@ export function VoicePopover() {
             : effectiveState === "listening"
               ? "Processing..."
               : "Press Space";
+  const browserPreviewStatus = browserView?.lastStepSummary || browserView?.status || statusMessage;
 
   // Bump statusKey to re-trigger fade animation when text changes
   useEffect(() => {
@@ -489,8 +495,16 @@ export function VoicePopover() {
     }
 
     if (isWorking) {
-      const width = workingExpanded ? WORKING_EXPANDED_WIDTH : WORKING_NOTCH_WIDTH;
-      const height = workingExpanded ? WORKING_EXPANDED_HEIGHT : WORKING_NOTCH_HEIGHT;
+      const width = showBrowserPreview
+        ? BROWSER_PREVIEW_WIDTH
+        : workingExpanded
+          ? WORKING_EXPANDED_WIDTH
+          : WORKING_NOTCH_WIDTH;
+      const height = showBrowserPreview
+        ? BROWSER_PREVIEW_HEIGHT
+        : workingExpanded
+          ? WORKING_EXPANDED_HEIGHT
+          : WORKING_NOTCH_HEIGHT;
       // Keep bottom edge fixed while shrinking/expanding and then snap to
       // bottom-center so the notch/pill never drifts or disappears.
       window.desktop?.shortcut?.resizePopover?.(width, height, true);
@@ -522,7 +536,7 @@ export function VoicePopover() {
     window.desktop?.shortcut?.repositionPopover?.("center");
     // For textPanelOpen: grow upward so the panel above the pill stays visible.
     window.desktop?.shortcut?.resizePopover?.(430, targetHeight, growUpward);
-  }, [showResponseCard, textPanelOpen, effectiveState, isWorking, workingExpanded, clarificationQuestion, overlayCollapsed, ipcLayoutReadyTick, measurePopoverHeight]);
+  }, [showResponseCard, textPanelOpen, effectiveState, isWorking, workingExpanded, showBrowserPreview, clarificationQuestion, overlayCollapsed, ipcLayoutReadyTick, measurePopoverHeight]);
 
   // Re-apply the correct window size whenever the popover is toggled back on.
   // When the overlay is hidden and re-shown, the main process resets the window
@@ -548,8 +562,16 @@ export function VoicePopover() {
       }
 
       if (isWorking) {
-        const width = workingExpanded ? WORKING_EXPANDED_WIDTH : WORKING_NOTCH_WIDTH;
-        const height = workingExpanded ? WORKING_EXPANDED_HEIGHT : WORKING_NOTCH_HEIGHT;
+        const width = showBrowserPreview
+          ? BROWSER_PREVIEW_WIDTH
+          : workingExpanded
+            ? WORKING_EXPANDED_WIDTH
+            : WORKING_NOTCH_WIDTH;
+        const height = showBrowserPreview
+          ? BROWSER_PREVIEW_HEIGHT
+          : workingExpanded
+            ? WORKING_EXPANDED_HEIGHT
+            : WORKING_NOTCH_HEIGHT;
         window.desktop?.shortcut?.resizePopover?.(width, height, true);
         window.desktop?.shortcut?.repositionPopover?.("bottom-center");
         return;
@@ -567,7 +589,7 @@ export function VoicePopover() {
       window.desktop?.shortcut?.resizePopover?.(430, targetHeight, textPanelOpen);
     });
     return () => unsub?.();
-  }, [showResponseCard, textPanelOpen, effectiveState, isWorking, workingExpanded, clarificationQuestion, overlayCollapsed, measurePopoverHeight]);
+  }, [showResponseCard, textPanelOpen, effectiveState, isWorking, workingExpanded, showBrowserPreview, clarificationQuestion, overlayCollapsed, measurePopoverHeight]);
 
   // Animate bars when speaking, go flat when idle
   useEffect(() => {
@@ -660,6 +682,7 @@ export function VoicePopover() {
     setError(null);
     useSessionStore.getState().setNarrationText("");
     useSessionStore.getState().setClarificationQuestion(null);
+    useSessionStore.getState().clearBrowserView();
     silenceStartRef.current = null;
     hasSpokenRef.current = false;
     const started = await startRecording();
@@ -676,6 +699,7 @@ export function VoicePopover() {
     const state = useSessionStore.getState();
     state.setTurnState("idle");
     state.setClarificationQuestion(null);
+    state.clearBrowserView();
     setBarScales(FLAT_SCALE);
     setWorkingExpanded(false);
   }, [animatePillTap, sendInterrupt]);
@@ -700,6 +724,10 @@ export function VoicePopover() {
       event.preventDefault();
       if (textPanelOpen) {
         setTextPanelOpen(false);
+        return;
+      }
+      if (isWorking && workingExpanded) {
+        setWorkingExpanded(false);
         return;
       }
       if (isRecording) stopRecording();
@@ -758,7 +786,7 @@ export function VoicePopover() {
       className={`voice-popover-screen ${showCollapsedNotch ? "voice-popover-screen--notch" : ""} ${expandingFromNotch ? "voice-popover-screen--expanding" : ""} ${prefersReducedMotion ? "voice-popover-screen--reduced-motion" : ""}`}
       onClick={(e) => { if (e.target === e.currentTarget) setTextPanelOpen(false); }}
     >
-      <section ref={shellRef} className={`voice-popover-shell ${entered ? "voice-popover-shell--entered" : ""}`}>
+      <section ref={shellRef} className={`voice-popover-shell ${entered ? "voice-popover-shell--entered" : ""} ${showBrowserPreview ? "voice-popover-shell--browser-preview" : ""}`}>
         {showNotchVisual && (
           <button
             ref={workingNotchButtonRef}
@@ -802,7 +830,51 @@ export function VoicePopover() {
             />
           </div>
         )}
-        {!showCollapsedNotch && <div className={`voice-pill-wrapper ${expandingFromNotch ? "voice-pill-wrapper--expand-in" : ""} ${isLiveState ? "voice-pill-wrapper--live" : ""} ${pillStateClass}`}>
+        {!showCollapsedNotch && showBrowserPreview && browserView && (
+          <div className="voice-browser-preview" role="dialog" aria-label="Browser task preview">
+            <div className="voice-browser-preview-toolbar">
+              <div className="voice-browser-preview-title">
+                <span className="voice-browser-preview-dot" aria-hidden="true" />
+                <span>Browser</span>
+              </div>
+              <span className="voice-browser-preview-status" title={browserPreviewStatus}>
+                {browserPreviewStatus}
+              </span>
+              <div className="voice-browser-preview-actions">
+                <button
+                  type="button"
+                  className="voice-browser-preview-icon-btn"
+                  onClick={() => setWorkingExpanded(false)}
+                  title="Collapse to bottom notch"
+                  aria-label="Collapse to bottom notch"
+                >
+                  <span aria-hidden="true">⌄</span>
+                </button>
+                <button
+                  type="button"
+                  className="voice-browser-preview-icon-btn"
+                  onClick={handleInterrupt}
+                  title="Cancel current task"
+                  aria-label="Cancel task"
+                >
+                  <span aria-hidden="true">×</span>
+                </button>
+              </div>
+            </div>
+            <div className="voice-browser-preview-frame">
+              {browserView.liveUrl ? (
+                <iframe
+                  src={browserView.liveUrl}
+                  title="Browser task live view"
+                  allow="clipboard-read; clipboard-write"
+                />
+              ) : (
+                <img src={browserPreviewUrl ?? ""} alt="Current browser task screenshot" />
+              )}
+            </div>
+          </div>
+        )}
+        {!showCollapsedNotch && !showBrowserPreview && <div className={`voice-pill-wrapper ${expandingFromNotch ? "voice-pill-wrapper--expand-in" : ""} ${isLiveState ? "voice-pill-wrapper--live" : ""} ${pillStateClass}`}>
           <span className="voice-pill-orbit" aria-hidden="true">
             <span className="voice-pill-orbit-dot" />
             <span className="voice-pill-orbit-dot" />
@@ -891,7 +963,7 @@ export function VoicePopover() {
             <span aria-hidden="true">›</span>
           </button>}
         </div>}
-        {!showCollapsedNotch && <p
+        {!showCollapsedNotch && !showBrowserPreview && <p
           key={statusKey}
           role="status"
           aria-live="polite"
@@ -901,7 +973,7 @@ export function VoicePopover() {
         >
           {statusMessage}
         </p>}
-        {!showCollapsedNotch && showResponseCard && (
+        {!showCollapsedNotch && !showBrowserPreview && showResponseCard && (
           <div ref={responseCardContainerRef} className="voice-response-card">
             <div className="voice-response-scroll" ref={responseScrollRef}>
               <MarkdownResponse text={narrationText} />

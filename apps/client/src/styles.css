@@ -1535,6 +1535,11 @@ body.runtime-macos .app-window-drag-handle {
   transform: scale(1) translateY(0);
 }
 
+.voice-popover-shell--browser-preview {
+  width: min(100%, 740px);
+  padding-inline: 8px;
+}
+
 .voice-meter-pill {
   width: var(--voice-pill-width);
   height: 54px;
@@ -1919,6 +1924,131 @@ body.runtime-macos .app-window-drag-handle {
   transform-origin: center;
 }
 
+.voice-browser-preview {
+  width: min(720px, calc(100vw - 20px));
+  height: min(520px, calc(100vh - 36px));
+  min-height: 320px;
+  order: 1;
+  display: grid;
+  grid-template-rows: 40px minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--voice-surface-border-strong) 76%, transparent);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(17, 20, 24, 0.96), rgba(8, 10, 13, 0.98));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 16px 38px rgba(0, 0, 0, 0.42);
+  -webkit-app-region: no-drag;
+  transform-origin: bottom center;
+  animation: response-fade-in 0.22s var(--easing-standard) both;
+}
+
+.voice-browser-preview-toolbar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(28, 32, 38, 0.96), rgba(16, 19, 24, 0.96));
+}
+
+.voice-browser-preview-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.voice-browser-preview-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--voice-accent-working) 64%, #d7dce2 36%);
+  box-shadow: 0 0 14px rgba(155, 180, 218, 0.44);
+}
+
+.voice-browser-preview-status {
+  min-width: 0;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--text-secondary) 86%, var(--text-muted) 14%);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  line-height: 1.2;
+  letter-spacing: 0;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voice-browser-preview-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.voice-browser-preview-icon-btn {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition: background var(--duration-fast) var(--easing-standard),
+    color var(--duration-fast) var(--easing-standard),
+    transform var(--duration-fast) var(--easing-standard);
+}
+
+.voice-browser-preview-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--text-primary);
+  transform: scale(1.05);
+}
+
+.voice-browser-preview-icon-btn:active {
+  transform: scale(0.94);
+}
+
+.voice-browser-preview-icon-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--voice-focus-ring);
+}
+
+.voice-browser-preview-frame {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: #05070a;
+}
+
+.voice-browser-preview-frame iframe,
+.voice-browser-preview-frame img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: #05070a;
+}
+
+.voice-browser-preview-frame iframe {
+  pointer-events: none;
+}
+
+.voice-browser-preview-frame img {
+  object-fit: cover;
+}
+
 @keyframes pill-expand-in {
   0% {
     opacity: 0;
@@ -1954,6 +2084,7 @@ body.runtime-macos .app-window-drag-handle {
   .voice-popover-screen--reduced-motion .voice-popover-status,
   .voice-popover-screen--reduced-motion .voice-pill-wrapper--expand-in,
   .voice-popover-screen--reduced-motion .voice-response-card,
+  .voice-popover-screen--reduced-motion .voice-browser-preview,
   .voice-popover-screen--reduced-motion .voice-text-panel,
   .voice-popover-screen--reduced-motion .voice-clarification-card,
   .voice-popover-screen--reduced-motion .voice-context-popover {
@@ -1987,6 +2118,7 @@ body.runtime-macos .app-window-drag-handle {
   .voice-popover-screen--reduced-motion .voice-cancel-btn,
   .voice-popover-screen--reduced-motion .voice-bottom-notch,
   .voice-popover-screen--reduced-motion .voice-clarification-send-btn,
+  .voice-popover-screen--reduced-motion .voice-browser-preview-icon-btn,
   .voice-popover-screen--reduced-motion .voice-text-toggle-btn,
   .voice-popover-screen--reduced-motion .voice-text-toggle-btn:hover,
   .voice-popover-screen--reduced-motion .voice-text-toggle-btn--open,

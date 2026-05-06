@@ -37,6 +37,7 @@ export function useSession(
         case "session_started":
           interruptPendingRef.current = false;
           store.getState().clearActionTimeline();
+          store.getState().clearBrowserView();
           store.getState().setSessionId(event.sessionId);
           store.getState().setConnected(true);
           store.getState().addActionTimelineItem({
@@ -52,6 +53,7 @@ export function useSession(
           if (event.state === "idle") {
             interruptPendingRef.current = false;
             store.getState().setClarificationQuestion(null);
+            store.getState().clearBrowserView();
           }
 
           store.getState().setTurnState(event.state);
@@ -81,6 +83,17 @@ export function useSession(
           });
           store.getState().addActionStatus(event.message);
           break;
+        case "browser_view":
+          store.getState().setBrowserView({
+            sessionId: event.sessionId,
+            status: event.status,
+            liveUrl: event.liveUrl ?? null,
+            screenshotUrl: event.screenshotUrl ?? null,
+            stepCount: event.stepCount ?? null,
+            lastStepSummary: event.lastStepSummary ?? null,
+            isTaskSuccessful: event.isTaskSuccessful ?? null,
+          });
+          break;
         case "narration_text":
           store.getState().setNarrationText(event.text);
           store.getState().addActionTimelineItem({
@@ -96,6 +109,7 @@ export function useSession(
           store.getState().setTurnState("idle");
           store.getState().clearActionStatuses();
           store.getState().setClarificationQuestion(null);
+          store.getState().clearBrowserView();
           store.getState().addActionTimelineItem({
             kind: "done",
             message: "Turn completed",
@@ -103,6 +117,7 @@ export function useSession(
           break;
         case "error":
           interruptPendingRef.current = false;
+          store.getState().clearBrowserView();
           store.getState().setError(event.message);
           store.getState().addActionTimelineItem({
             kind: "error",
@@ -154,6 +169,7 @@ export function useSession(
 
   const sendInterrupt = useCallback(() => {
     interruptPendingRef.current = true;
+    store.getState().clearBrowserView();
     socketRef.current?.send({ type: "interrupt" });
   }, []);
 

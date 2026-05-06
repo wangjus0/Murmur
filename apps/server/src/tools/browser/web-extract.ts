@@ -28,7 +28,7 @@ export const webExtractTool: ToolDefinition = {
     try {
       const output = await browser.runTask(
         buildWebExtractPrompt(ctx.query),
-        { onStatus: ctx.onStatus }
+        { onStatus: ctx.onStatus, onBrowserView: ctx.onBrowserView }
       );
       return { success: true, output };
     } catch (err) {
