@@ -202,7 +202,7 @@ ${AVAILABLE_TOOL_IDS.join(", ")}
 ## Implicit service mappings — apply these FIRST before considering browser_use
 Even when the user does NOT name a brand, map these topics to the right integration:
 - "email", "emails", "inbox", "unread", "check my email", "read my email" → gmail
-- "calendar", "schedule", "events", "appointments", "upcoming meetings" → google_calendar
+- "calendar", "schedule", "agenda", "events", "appointments", "upcoming meetings" → google_calendar
 - "spreadsheet", "sheet" → google_sheets
 - "document", "doc" (not a URL) → google_docs
 - "my files", "my drive" → google_drive
@@ -246,6 +246,7 @@ const PROVIDER_DETECTION_TERMS: Partial<Record<ToolId, readonly string[]>> = {
     // Generic calendar / scheduling terms
     "my calendar", "check calendar", "check my calendar", "calendar events",
     "my schedule", "check my schedule", "upcoming events", "what's on my calendar",
+    "my agenda", "what's on my agenda",
     "add to calendar", "create event", "schedule meeting", "schedule a meeting",
     "appointments", "my appointments",
   ],
@@ -1175,12 +1176,27 @@ function mapToolPlanIntegrationToToolId(name: string): ToolId | null {
 
 const BROWSER_REQUIRED_PATTERN =
   /\b(https?:\/\/|website|webpage|open|go to|navigate|click|login|log in|sign in|buy|purchase|order|book|schedule|fill|submit|register|apply|checkout|download|upload)\b/i;
+const PRIVATE_CONTEXT_PATTERN =
+  /\b(i|me|my|mine|our|ours|we|team|workspace|account)\b/i;
+const INTEGRATION_TOPIC_PATTERN =
+  /\b(agenda|calendar|schedule|meeting|meetings|appointment|appointments|event|events|email|emails|inbox|unread|message|messages|dm|dms|file|files|drive|document|documents|doc|docs|sheet|sheets|spreadsheet|spreadsheets|note|notes|database|repo|repos|repository|repositories|pull request|pull requests|pr|prs|issue|issues|ticket|tickets|invoice|invoices|payment|payments|customer|customers|contact|contacts|deal|deals)\b/i;
 
 function isReadOnlyFastSearchRequest(
   intent: IntentResult["intent"],
   userRequest: string
 ): boolean {
   return intent === "search" && !BROWSER_REQUIRED_PATTERN.test(userRequest);
+}
+
+function isPotentialPrivateIntegrationRequest(
+  intent: IntentResult["intent"],
+  userRequest: string
+): boolean {
+  return (
+    (intent === "search" || intent === "quick_answer") &&
+    PRIVATE_CONTEXT_PATTERN.test(userRequest) &&
+    INTEGRATION_TOPIC_PATTERN.test(userRequest)
+  );
 }
 
 function buildIntegrationOptionsFromTool(
@@ -1318,7 +1334,19 @@ export async function handleTranscriptFinal(
       return; // Do NOT send "done" — session remains open for the user's reply
     }
 
-    const result: IntentResult = classified;
+    const shouldPreserveIntegrationRouting = isPotentialPrivateIntegrationRequest(
+      classified.intent,
+      resolvedText
+    );
+    const result: IntentResult =
+      shouldPreserveIntegrationRouting && classified.intent === "quick_answer"
+        ? {
+            ...classified,
+            intent: "search",
+            answer: undefined,
+            needs_web_search: undefined,
+          }
+        : classified;
     session.send({ type: "intent", intent: result });
 
     if (result.intent === "quick_answer") {
@@ -1391,8 +1419,8 @@ export async function handleTranscriptFinal(
     const routingStartMs = Date.now();
     const detectedTool = detectExplicitIntegrationTool(resolvedText);
     const needsToolPlan =
-      deps.enableLlmToolGuide &&
       !detectedTool &&
+      (deps.enableLlmToolGuide || shouldPreserveIntegrationRouting) &&
       result.intent !== "web_extract" &&
       result.intent !== "multi_site_compare";
     const toolPlan = needsToolPlan
@@ -1434,6 +1462,7 @@ export async function handleTranscriptFinal(
     const useFastSearchRoute =
       !integrationOptions.preferredToolId &&
       deps.tavilyApiKey.length > 0 &&
+      !shouldPreserveIntegrationRouting &&
       isReadOnlyFastSearchRequest(result.intent, resolvedText);
     logDuration("routing", routingStartMs);
 

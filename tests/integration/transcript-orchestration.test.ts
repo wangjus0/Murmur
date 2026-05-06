@@ -427,6 +427,84 @@ test("read-only search uses fast Tavily path and skips Browser Use/refinement", 
   assert.deepEqual(narratedTexts, ["Top result: Demo Project - https://example.com/demo"]);
 });
 
+test("private integration-like lookup runs tool guide before Tavily fallback", async () => {
+  const session = new FakeSession();
+  const narratedTexts: string[] = [];
+  let aiCalls = 0;
+  let fastSearchCalls = 0;
+  const browserOptions: Array<{
+    preferredToolId?: string;
+    forceIntegration?: boolean;
+    integrationInstruction?: string;
+  }> = [];
+
+  const ai = {
+    models: {
+      generateContent: async () => {
+        aiCalls += 1;
+        return {
+          text: JSON.stringify({
+            strategy: "integration_direct",
+            integrations: ["Google Calendar"],
+            enhanced_prompt: "Check calendar meetings for tomorrow.",
+            reasoning: "This asks about the user's private meeting agenda.",
+          }),
+        };
+      },
+    },
+  } as unknown as GoogleGenAI;
+
+  await handleTranscriptFinal(
+    session,
+    ai,
+    "elevenlabs-test-key",
+    "what meetings do I have tomorrow",
+    undefined,
+    {
+      createBrowserAdapter: () => ({
+        runSearch: async (query, callbacks, options) => {
+          assert.equal(query, "Check calendar meetings for tomorrow.");
+          browserOptions.push({
+            preferredToolId: options?.preferredToolId,
+            forceIntegration: options?.forceIntegration,
+            integrationInstruction: options?.integrationInstruction,
+          });
+          callbacks.onStatus("Opened calendar integration");
+          return "Calendar: Standup at 9 AM.";
+        },
+        runFormFillDraft: async () => {
+          throw new Error("Unexpected form fill path");
+        },
+      }),
+      fastSearch: async () => {
+        fastSearchCalls += 1;
+        return null;
+      },
+      narrate: async (narrationSession, text) => {
+        narratedTexts.push(text);
+        narrationSession.send({ type: "narration_text", text });
+      },
+      tavilyApiKey: "tavily-test-key",
+      enableLlmToolGuide: false,
+      enableOutputRefinement: false,
+      browserApiKey: "browser-use-test-key",
+    }
+  );
+
+  assert.equal(aiCalls, 1);
+  assert.equal(fastSearchCalls, 0);
+  assert.deepEqual(browserOptions, [
+    {
+      preferredToolId: "google_calendar",
+      forceIntegration: true,
+      integrationInstruction:
+        "Can you use the google calendar integration and what meetings do i have tomorrow",
+    },
+  ]);
+  assert.deepEqual(session.states, ["thinking", "acting", "speaking", "idle"]);
+  assert.deepEqual(narratedTexts, ["Calendar: Standup at 9 AM."]);
+});
+
 test("read-only search falls back to Browser Use when Tavily is unavailable", async () => {
   const session = new FakeSession();
   const browserCalls: string[] = [];
