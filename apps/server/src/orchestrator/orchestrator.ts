@@ -477,6 +477,67 @@ async function synthesizeTavilyAnswer(
   }
 }
 
+const QUICK_ANSWER_UNAVAILABLE =
+  "The quick-answer model is temporarily unavailable. Please try again in a moment.";
+
+const GENERAL_QUICK_ANSWER_SYSTEM_PROMPT = `Answer the user's general question directly.
+Rules:
+- Keep the answer to 1-2 concise sentences.
+- Do not browse, use tools, or describe your process.
+- If you are not confident, say so briefly.
+
+Respond with JSON only:
+{
+  "answer": "the answer"
+}`;
+
+async function generateGeneralQuickAnswer(
+  ai: AiClient,
+  userRequest: string,
+  historyContext?: string
+): Promise<string> {
+  const generateContent = ai?.models?.generateContent;
+  if (typeof generateContent !== "function") {
+    return QUICK_ANSWER_UNAVAILABLE;
+  }
+
+  try {
+    const contextSection = historyContext
+      ? `[Conversation history]\n${historyContext}\n\n`
+      : "";
+    const response = await generateContent({
+      model: "quick-answer",
+      contents:
+        `${GENERAL_QUICK_ANSWER_SYSTEM_PROMPT}\n\n` +
+        `${contextSection}` +
+        `User asked: "${userRequest}"`,
+      config: { responseMimeType: "application/json" },
+    });
+
+    const responseText = response.text;
+    if (!responseText) {
+      return QUICK_ANSWER_UNAVAILABLE;
+    }
+
+    try {
+      const parsed = JSON.parse(responseText) as { answer?: unknown };
+      if (typeof parsed.answer === "string" && parsed.answer.trim()) {
+        return normalizeNarrationText(parsed.answer);
+      }
+    } catch {
+      const normalized = normalizeNarrationText(responseText);
+      if (normalized) {
+        return normalized;
+      }
+    }
+
+    return QUICK_ANSWER_UNAVAILABLE;
+  } catch (err) {
+    console.warn("[Orchestrator] Quick answer generation failed:", err);
+    return QUICK_ANSWER_UNAVAILABLE;
+  }
+}
+
 const BROWSER_QUERY_REFINEMENT_SYSTEM_PROMPT = `You compress a user request into a short Browser Use task query.
 Return JSON only:
 {
@@ -1159,8 +1220,8 @@ export async function handleTranscriptFinal(
       let answer: string;
 
       if (result.needs_web_search && env.TAVILY_API_KEY) {
-        // Fast web search path: use Tavily to get live data, then let Gemini
-        // synthesize a clean spoken answer from the results.
+        // Fast web search path: use Tavily for live data and avoid an extra
+        // OpenRouter synthesis/refinement call on the latency-sensitive voice path.
         session.send({ type: "action_status", message: "Searching the web..." });
         const tavilyResult = await tavilySearch(
           resolvedText,
@@ -1169,26 +1230,18 @@ export async function handleTranscriptFinal(
         );
 
         if (tavilyResult && tavilyResult.summary) {
-          answer = await synthesizeTavilyAnswer(
-            ai,
-            resolvedText,
-            tavilyResult.summary,
-            historyContext || undefined
-          );
+          answer = normalizeNarrationText(tavilyResult.summary);
         } else {
-          // Tavily failed or returned nothing — fall back to Gemini-only answer.
           answer = result.answer || "I wasn't able to find a current answer to that.";
         }
       } else {
-        // Pure Gemini knowledge answer (no web search needed).
-        answer = result.answer || "I'm not sure how to answer that.";
+        answer =
+          result.answer ||
+          await generateGeneralQuickAnswer(ai, resolvedText, historyContext || undefined);
       }
 
       session.setState("speaking");
-      // quick_answer responses come from Gemini/Tavily already written for voice,
-      // so they are usually already concise. Still run through summarizeForSpeech
-      // to catch any cases where the answer grew long.
-      const spokenAnswer = await summarizeForSpeech(ai, answer);
+      const spokenAnswer = toCoreNarrationText(answer);
       await deps.narrate(session, answer, apiKey, spokenAnswer);
       // Push history and compact in the background — don't block the done event.
       if (history) {

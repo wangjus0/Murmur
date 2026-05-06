@@ -1,5 +1,5 @@
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1/chat/completions";
-const MODEL = "stepfun/step-3.5-flash:free";
+const MODEL = "openrouter/free";
 
 export interface AiClient {
   models: {

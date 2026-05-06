@@ -4,81 +4,98 @@ import test from "node:test";
 import type { AiClient } from "../../apps/server/src/config/ai-client.ts";
 import { classifyIntent } from "../../apps/server/src/orchestrator/intent.ts";
 
-function createAi(responseText?: string, error?: Error): AiClient {
+function createFailingAi(onCall: () => void): AiClient {
   return {
     models: {
       generateContent: async () => {
-        if (error) {
-          throw error;
-        }
-
-        return { text: responseText };
+        onCall();
+        throw new Error("OpenRouter should not be called by classifyIntent");
       },
     },
   } as AiClient;
 }
 
-test("classifyIntent returns search result when confidence is high", async () => {
-  const ai = createAi(
-    JSON.stringify({
-      intent: "search",
-      confidence: 0.91,
-      query: "ignored by classifier",
-    })
-  );
+test("classifyIntent answers simple arithmetic without OpenRouter", async () => {
+  let calls = 0;
+  const result = await classifyIntent(createFailingAi(() => { calls += 1; }), "What is one plus one?");
 
-  const result = await classifyIntent(ai, "search for Murmur winners");
-
+  assert.equal(calls, 0);
   assert.deepEqual(result, {
-    intent: "search",
-    confidence: 0.91,
-    query: "search for Murmur winners",
+    intent: "quick_answer",
+    confidence: 0.95,
+    query: "What is one plus one?",
+    answer: "The answer is 2.",
+    needs_web_search: false,
   });
 });
 
-test("classifyIntent proceeds proactively when confidence is low", async () => {
-  const ai = createAi(
-    JSON.stringify({
-      intent: "form_fill_draft",
-      confidence: 0.42,
-      query: "ignored by classifier",
-      clarification: "Which form should I fill out?",
-    })
+test("classifyIntent routes live lookups to quick web search without OpenRouter", async () => {
+  let calls = 0;
+  const result = await classifyIntent(
+    createFailingAi(() => { calls += 1; }),
+    "what is the weather in San Francisco today?"
   );
 
-  const result = await classifyIntent(ai, "fill something out for me");
+  assert.equal(calls, 0);
+  assert.deepEqual(result, {
+    intent: "quick_answer",
+    confidence: 0.72,
+    query: "what is the weather in San Francisco today?",
+    needs_web_search: true,
+  });
+});
 
+test("classifyIntent routes general knowledge questions to quick answer", async () => {
+  let calls = 0;
+  const result = await classifyIntent(
+    createFailingAi(() => { calls += 1; }),
+    "what is the capital of France?"
+  );
+
+  assert.equal(calls, 0);
+  assert.deepEqual(result, {
+    intent: "quick_answer",
+    confidence: 0.72,
+    query: "what is the capital of France?",
+    needs_web_search: false,
+  });
+});
+
+test("classifyIntent handles conversational acknowledgements locally", async () => {
+  let calls = 0;
+  const result = await classifyIntent(createFailingAi(() => { calls += 1; }), "That's great.");
+
+  assert.equal(calls, 0);
+  assert.deepEqual(result, {
+    intent: "quick_answer",
+    confidence: 0.95,
+    query: "That's great.",
+    answer: "Glad that helped.",
+    needs_web_search: false,
+  });
+});
+
+test("classifyIntent detects form fill requests locally", async () => {
+  let calls = 0;
+  const result = await classifyIntent(createFailingAi(() => { calls += 1; }), "fill something out for me");
+
+  assert.equal(calls, 0);
   assert.deepEqual(result, {
     intent: "form_fill_draft",
-    confidence: 0.51,
+    confidence: 0.72,
     query: "fill something out for me",
   });
 });
 
-test("classifyIntent returns heuristic fallback when the model output is invalid", async () => {
-  const ai = createAi("not json");
+test("classifyIntent asks for clarification on ambiguous references", async () => {
+  let calls = 0;
+  const result = await classifyIntent(createFailingAi(() => { calls += 1; }), "search for it");
 
-  const result = await classifyIntent(ai, "do the thing");
-
+  assert.equal(calls, 0);
   assert.deepEqual(result, {
-    intent: "search",
-    confidence: 0.5,
-    query: "do the thing",
-  });
-});
-
-test("classifyIntent handles missing required model fields without throwing", async () => {
-  const ai = createAi(
-    JSON.stringify({
-      query: "ignored by classifier",
-    })
-  );
-
-  const result = await classifyIntent(ai, "do the thing");
-
-  assert.deepEqual(result, {
-    intent: "search",
-    confidence: 0.51,
-    query: "do the thing",
+    intent: "clarify",
+    confidence: 0.95,
+    query: "search for it",
+    clarification: "What should I work on?",
   });
 });

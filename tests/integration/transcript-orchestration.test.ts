@@ -24,6 +24,196 @@ class FakeSession {
   }
 }
 
+test("quick arithmetic answer does not call OpenRouter or Browser Use", async () => {
+  const session = new FakeSession();
+  const narratedTexts: string[] = [];
+  let aiCalls = 0;
+  let browserCalls = 0;
+
+  const ai = {
+    models: {
+      generateContent: async () => {
+        aiCalls += 1;
+        throw new Error("OpenRouter should not be called for local quick answers");
+      },
+    },
+  } as unknown as GoogleGenAI;
+
+  await handleTranscriptFinal(
+    session,
+    ai,
+    "elevenlabs-test-key",
+    "What is one plus one?",
+    undefined,
+    {
+      createBrowserAdapter: () => ({
+        runSearch: async () => {
+          browserCalls += 1;
+          return "unexpected";
+        },
+        runFormFillDraft: async () => {
+          browserCalls += 1;
+          return "unexpected";
+        },
+      }),
+      narrate: async (narrationSession, text) => {
+        narratedTexts.push(text);
+        narrationSession.send({ type: "narration_text", text });
+      },
+      browserApiKey: "browser-use-test-key",
+    }
+  );
+
+  assert.equal(aiCalls, 0);
+  assert.equal(browserCalls, 0);
+  assert.deepEqual(session.states, ["thinking", "speaking", "idle"]);
+  assert.deepEqual(narratedTexts, ["The answer is 2."]);
+  assert.deepEqual(
+    session.events.map((event) => event.type),
+    ["intent", "narration_text", "done"]
+  );
+});
+
+test("general quick answer uses one OpenRouter call and no browser path", async () => {
+  const session = new FakeSession();
+  const narratedTexts: string[] = [];
+  let aiCalls = 0;
+  let browserCalls = 0;
+
+  const ai = {
+    models: {
+      generateContent: async () => {
+        aiCalls += 1;
+        return { text: JSON.stringify({ answer: "Paris is the capital of France." }) };
+      },
+    },
+  } as unknown as GoogleGenAI;
+
+  await handleTranscriptFinal(
+    session,
+    ai,
+    "elevenlabs-test-key",
+    "what is the capital of France?",
+    undefined,
+    {
+      createBrowserAdapter: () => ({
+        runSearch: async () => {
+          browserCalls += 1;
+          return "unexpected";
+        },
+        runFormFillDraft: async () => {
+          browserCalls += 1;
+          return "unexpected";
+        },
+      }),
+      narrate: async (narrationSession, text) => {
+        narratedTexts.push(text);
+        narrationSession.send({ type: "narration_text", text });
+      },
+      browserApiKey: "browser-use-test-key",
+    }
+  );
+
+  assert.equal(aiCalls, 1);
+  assert.equal(browserCalls, 0);
+  assert.deepEqual(session.states, ["thinking", "speaking", "idle"]);
+  assert.deepEqual(narratedTexts, ["Paris is the capital of France."]);
+});
+
+test("general quick answer rate limit returns fallback without browser path", async () => {
+  const session = new FakeSession();
+  const narratedTexts: string[] = [];
+  let aiCalls = 0;
+  let browserCalls = 0;
+
+  const ai = {
+    models: {
+      generateContent: async () => {
+        aiCalls += 1;
+        throw new Error("OpenRouter 429: upstream rate limited");
+      },
+    },
+  } as unknown as GoogleGenAI;
+
+  await handleTranscriptFinal(
+    session,
+    ai,
+    "elevenlabs-test-key",
+    "what is the capital of France?",
+    undefined,
+    {
+      createBrowserAdapter: () => ({
+        runSearch: async () => {
+          browserCalls += 1;
+          return "unexpected";
+        },
+        runFormFillDraft: async () => {
+          browserCalls += 1;
+          return "unexpected";
+        },
+      }),
+      narrate: async (narrationSession, text) => {
+        narratedTexts.push(text);
+        narrationSession.send({ type: "narration_text", text });
+      },
+      browserApiKey: "browser-use-test-key",
+    }
+  );
+
+  assert.equal(aiCalls, 1);
+  assert.equal(browserCalls, 0);
+  assert.deepEqual(session.states, ["thinking", "speaking", "idle"]);
+  assert.deepEqual(narratedTexts, [
+    "The quick-answer model is temporarily unavailable. Please try again in a moment.",
+  ]);
+});
+
+test("conversational acknowledgement stays local and skips tool routing", async () => {
+  const session = new FakeSession();
+  const narratedTexts: string[] = [];
+  let aiCalls = 0;
+  let browserCalls = 0;
+
+  const ai = {
+    models: {
+      generateContent: async () => {
+        aiCalls += 1;
+        throw new Error("OpenRouter should not be called for acknowledgements");
+      },
+    },
+  } as unknown as GoogleGenAI;
+
+  await handleTranscriptFinal(
+    session,
+    ai,
+    "elevenlabs-test-key",
+    "That's great.",
+    undefined,
+    {
+      createBrowserAdapter: () => ({
+        runSearch: async () => {
+          browserCalls += 1;
+          return "unexpected";
+        },
+        runFormFillDraft: async () => {
+          browserCalls += 1;
+          return "unexpected";
+        },
+      }),
+      narrate: async (narrationSession, text) => {
+        narratedTexts.push(text);
+        narrationSession.send({ type: "narration_text", text });
+      },
+      browserApiKey: "browser-use-test-key",
+    }
+  );
+
+  assert.equal(aiCalls, 0);
+  assert.equal(browserCalls, 0);
+  assert.deepEqual(session.states, ["thinking", "speaking", "idle"]);
+  assert.deepEqual(narratedTexts, ["Glad that helped."]);
+});
+
 test("final transcript flows through intent, browser action, narration, and done", async () => {
   const session = new FakeSession();
   const browserCalls: string[] = [];

@@ -165,7 +165,7 @@ export class BrowserAdapter implements BrowserTaskExecutor {
     // v3: session creation and task dispatch are a single POST
     const body: Record<string, unknown> = { task };
     if (this.profileId) {
-      body.profile_id = this.profileId;
+      body.profileId = this.profileId;
     }
 
     const createRes = await fetch(`${BASE_URL}/sessions`, {
