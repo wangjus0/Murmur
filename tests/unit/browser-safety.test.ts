@@ -269,6 +269,57 @@ test("v3 runSearch session body never contains skillIds or systemPromptExtension
   }
 });
 
+test("v3 runSearch waits for session cleanup before resolving", async () => {
+  const originalFetch = globalThis.fetch;
+  let deleteStarted = false;
+  let resolveDelete: ((response: Response) => void) | null = null;
+
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = (init?.method ?? "GET").toUpperCase();
+
+    if (method === "POST" && url.includes("/sessions")) {
+      return new Response(JSON.stringify({ id: "sess_v3_cleanup" }), { status: 200 });
+    }
+
+    if (method === "GET" && url.includes("/sessions/sess_v3_cleanup")) {
+      return new Response(
+        JSON.stringify({ status: "stopped", output: "Task complete before cleanup." }),
+        { status: 200 }
+      );
+    }
+
+    if (method === "DELETE") {
+      deleteStarted = true;
+      return new Promise<Response>((resolve) => {
+        resolveDelete = resolve;
+      });
+    }
+
+    throw new Error(`Unexpected fetch call: ${method} ${url}`);
+  }) as typeof fetch;
+
+  try {
+    const adapter = new BrowserAdapter("bu_test_integration_key");
+    let resolved = false;
+    const outputPromise = adapter.runSearch("check unread emails", { onStatus: () => {} }).then((output) => {
+      resolved = true;
+      return output;
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.equal(deleteStarted, true);
+    assert.equal(resolved, false);
+    resolveDelete?.(new Response(null, { status: 200 }));
+    const output = await outputPromise;
+    assert.equal(resolved, true);
+    assert.equal(output, "Task complete before cleanup.");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("v3 runSearch emits live browser view URLs from session create and poll", async () => {
   const originalFetch = globalThis.fetch;
   const browserViewUpdates: BrowserViewUpdate[] = [];

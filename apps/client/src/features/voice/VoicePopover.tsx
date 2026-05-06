@@ -17,7 +17,7 @@ const BAR_COUNT = 9;
 const BASE_BAR_SCALE = [0.34, 0.5, 0.72, 0.9, 0.76, 0.92, 0.7, 0.52, 0.36];
 const FLAT_SCALE = new Array(BAR_COUNT).fill(0.12);
 const SILENCE_THRESHOLD = 0.12;
-const SILENCE_TIMEOUT_MS = 3000;
+const SILENCE_TIMEOUT_MS = 1100;
 const WORKING_EXPANDED_WIDTH = 280;
 const WORKING_EXPANDED_HEIGHT = 96;
 const WORKING_NOTCH_WIDTH = 96;
@@ -94,7 +94,7 @@ export function VoicePopover() {
     onStop: sendAudioEndWithContext,
     onError: setError,
     onAudioLevel: (level) => {
-      // Auto-stop after 3s of silence (only after user has spoken)
+      // Auto-stop after silence (only after user has spoken).
       if (isRecordingRef.current) {
         if (level > SILENCE_THRESHOLD) {
           hasSpokenRef.current = true;

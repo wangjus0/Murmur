@@ -1,7 +1,7 @@
 import type { AiClient } from "../config/ai-client.js";
 import type { IntentResult, ServerEvent } from "@murmur/shared";
 import { env } from "../config/env.js";
-import { tavilySearch } from "../tools/tavily/tavily-search.js";
+import { tavilySearch, type TavilySearchResult } from "../tools/tavily/tavily-search.js";
 import { BrowserAdapter, type BrowserViewUpdate } from "../tools/browser/adapter.js";
 import { narrate } from "../voice/narrator.js";
 import {
@@ -81,6 +81,14 @@ interface TranscriptFinalLegacyDependencies {
     rawOutput: string,
     historyContext?: string
   ) => Promise<RefinedOutput>;
+  fastSearch?: (
+    query: string,
+    apiKey: string,
+    onStatus?: (message: string) => void
+  ) => Promise<TavilySearchResult | null>;
+  tavilyApiKey?: string;
+  enableLlmToolGuide?: boolean;
+  enableOutputRefinement?: boolean;
   browserApiKey?: string;
   browserApiKeySource?: "user" | "server";
 }
@@ -110,6 +118,14 @@ type TranscriptFinalDeps = Readonly<{
     toolId: ToolId,
     historyContext?: string
   ) => Promise<string>;
+  fastSearch: (
+    query: string,
+    apiKey: string,
+    onStatus?: (message: string) => void
+  ) => Promise<TavilySearchResult | null>;
+  tavilyApiKey: string;
+  enableLlmToolGuide: boolean;
+  enableOutputRefinement: boolean;
   browserApiKey: string;
   browserApiKeySource: "user" | "server";
 }>;
@@ -121,6 +137,10 @@ const defaultDeps: TranscriptFinalDeps = {
   selectTool: selectToolWithGemini,
   refineOutput: refineOutputWithGemini,
   refineBrowserQuery: refineBrowserQueryWithGemini,
+  fastSearch: tavilySearch,
+  tavilyApiKey: env.TAVILY_API_KEY ?? "",
+  enableLlmToolGuide: env.MURMUR_ENABLE_LLM_TOOL_GUIDE,
+  enableOutputRefinement: env.MURMUR_ENABLE_OUTPUT_REFINEMENT,
   browserApiKey: env.BROWSER_USE_API_KEY,
   browserApiKeySource: "server",
 };
@@ -182,7 +202,7 @@ ${AVAILABLE_TOOL_IDS.join(", ")}
 ## Implicit service mappings — apply these FIRST before considering browser_use
 Even when the user does NOT name a brand, map these topics to the right integration:
 - "email", "emails", "inbox", "unread", "check my email", "read my email" → gmail
-- "calendar", "schedule", "events", "appointments", "upcoming meetings" → google_calendar
+- "calendar", "schedule", "agenda", "events", "appointments", "upcoming meetings" → google_calendar
 - "spreadsheet", "sheet" → google_sheets
 - "document", "doc" (not a URL) → google_docs
 - "my files", "my drive" → google_drive
@@ -226,6 +246,7 @@ const PROVIDER_DETECTION_TERMS: Partial<Record<ToolId, readonly string[]>> = {
     // Generic calendar / scheduling terms
     "my calendar", "check calendar", "check my calendar", "calendar events",
     "my schedule", "check my schedule", "upcoming events", "what's on my calendar",
+    "my agenda", "what's on my agenda",
     "add to calendar", "create event", "schedule meeting", "schedule a meeting",
     "appointments", "my appointments",
   ],
@@ -322,16 +343,26 @@ async function maybeCompactHistory(
 // Patterns that indicate the user's request may depend on prior context.
 const UNDERSPECIFIED_PATTERNS = [
   /\b(it|that|this|those|these|they|them|there)\b/i,
-  /\b(the same|more of|another|again|like that|like those)\b/i,
+  /\b(the same|same for|also for|more of|another|again|like that|like those)\b/i,
   /^(yes|no|okay|ok|sure|good|bad|nice|great|cool|perfect)\b/i,
   /^(tell me more|what about|and what|but what|so what|how about)\b/i,
   /^(show me|find me|get me|give me|look up|search for)\s+\w{1,3}\b/i,
   /\b(the (first|second|third|last|previous|next) one)\b/i,
+  /^(today|tomorrow|yesterday|tonight|next|last|this|previous)\b/i,
 ];
 
-function isTranscriptUnderspecified(transcript: string): boolean {
-  const words = transcript.trim().split(/\s+/);
-  if (words.length <= 4) return true; // very short — likely context-dependent
+function isTranscriptContextDependent(
+  transcript: string,
+  classified?: IntentResult
+): boolean {
+  if (
+    classified?.intent === "quick_answer" &&
+    classified.answer &&
+    classified.needs_web_search !== true
+  ) {
+    return false;
+  }
+
   return UNDERSPECIFIED_PATTERNS.some((p) => p.test(transcript.trim()));
 }
 
@@ -516,7 +547,7 @@ async function generateGeneralQuickAnswer(
         `${GENERAL_QUICK_ANSWER_SYSTEM_PROMPT}\n\n` +
         `${contextSection}` +
         `User asked: "${userRequest}"`,
-      config: { responseMimeType: "application/json" },
+      config: { responseMimeType: "application/json", maxTokens: 180 },
     });
 
     const responseText = response.text;
@@ -1144,6 +1175,62 @@ function mapToolPlanIntegrationToToolId(name: string): ToolId | null {
   return INTEGRATION_NAME_TO_TOOL_ID[lower] ?? null;
 }
 
+const BROWSER_REQUIRED_PATTERN =
+  /\b(https?:\/\/|website|webpage|open|go to|navigate|click|login|log in|sign in|buy|purchase|order|book|schedule|fill|submit|register|apply|checkout|download|upload)\b/i;
+const PRIVATE_CONTEXT_PATTERN =
+  /\b(i|me|my|mine|our|ours|we|team|workspace|account)\b/i;
+const INTEGRATION_TOPIC_PATTERN =
+  /\b(agenda|calendar|schedule|meeting|meetings|appointment|appointments|event|events|email|emails|inbox|unread|message|messages|dm|dms|file|files|drive|document|documents|doc|docs|sheet|sheets|spreadsheet|spreadsheets|note|notes|database|repo|repos|repository|repositories|pull request|pull requests|pr|prs|issue|issues|ticket|tickets|invoice|invoices|payment|payments|customer|customers|contact|contacts|deal|deals)\b/i;
+
+function isReadOnlyFastSearchRequest(
+  intent: IntentResult["intent"],
+  userRequest: string
+): boolean {
+  return intent === "search" && !BROWSER_REQUIRED_PATTERN.test(userRequest);
+}
+
+function isPotentialPrivateIntegrationRequest(
+  intent: IntentResult["intent"],
+  userRequest: string
+): boolean {
+  return (
+    (intent === "search" || intent === "quick_answer") &&
+    PRIVATE_CONTEXT_PATTERN.test(userRequest) &&
+    INTEGRATION_TOPIC_PATTERN.test(userRequest)
+  );
+}
+
+function buildIntegrationOptionsFromTool(
+  toolId: ToolId,
+  userRequest: string,
+  source: string
+): {
+  forceIntegration: true;
+  preferredToolId: ToolId;
+  integrationInstruction: string;
+} | null {
+  if (!INTEGRATION_TOOL_IDS.has(toolId)) {
+    return null;
+  }
+
+  const instruction = buildIntegrationInstructionForTool(toolId, userRequest);
+  if (!instruction) {
+    return null;
+  }
+
+  console.log(`[Orchestrator] Routing to integration: ${toolId} (${source})`);
+  return {
+    forceIntegration: true,
+    preferredToolId: toolId,
+    integrationInstruction: instruction,
+  };
+}
+
+function responseFromRawOutput(rawOutput: string): RefinedOutput {
+  const displayText = rawOutput.trim() || "Task completed.";
+  return { displayText, spokenSummary: toCoreNarrationText(displayText) };
+}
+
 function resolveDeps(maybeDeps: TranscriptFinalOverrideDeps | undefined): TranscriptFinalDeps {
   return {
     classify: maybeDeps?.classify ?? maybeDeps?.classifyIntent ?? defaultDeps.classify,
@@ -1153,6 +1240,12 @@ function resolveDeps(maybeDeps: TranscriptFinalOverrideDeps | undefined): Transc
     selectTool: maybeDeps?.selectTool ?? defaultDeps.selectTool,
     refineOutput: maybeDeps?.refineOutput ?? defaultDeps.refineOutput,
     refineBrowserQuery: maybeDeps?.refineBrowserQuery ?? defaultDeps.refineBrowserQuery,
+    fastSearch: maybeDeps?.fastSearch ?? defaultDeps.fastSearch,
+    tavilyApiKey: maybeDeps?.tavilyApiKey ?? defaultDeps.tavilyApiKey,
+    enableLlmToolGuide:
+      maybeDeps?.enableLlmToolGuide ?? defaultDeps.enableLlmToolGuide,
+    enableOutputRefinement:
+      maybeDeps?.enableOutputRefinement ?? defaultDeps.enableOutputRefinement,
     browserApiKey: maybeDeps?.browserApiKey ?? defaultDeps.browserApiKey,
     browserApiKeySource:
       maybeDeps?.browserApiKeySource ?? defaultDeps.browserApiKeySource,
@@ -1177,27 +1270,51 @@ export async function handleTranscriptFinal(
   );
 
   const historyContext = history ? buildHistoryContext(history) : "";
+  const turnStartMs = Date.now();
+  const logElapsed = (label: string): void => {
+    console.log(`[Latency] ${label}_elapsed_ms=${Date.now() - turnStartMs}`);
+  };
+  const logDuration = (label: string, startMs: number): void => {
+    console.log(
+      `[Latency] ${label}_ms=${Date.now() - startMs} elapsed_ms=${Date.now() - turnStartMs}`
+    );
+  };
+  const narrateResponse = async (
+    displayText: string,
+    spokenText?: string
+  ): Promise<void> => {
+    logElapsed("first_narration_text");
+    await deps.narrate(session, displayText, apiKey, spokenText);
+  };
 
   try {
     session.setState("thinking");
 
-    // Resolve underspecified/context-dependent requests using session history.
-    // e.g. "show me more", "what about that one", "it" → fully specified query.
     let resolvedText = text;
-    if (historyContext && isTranscriptUnderspecified(text)) {
+    let classificationStartMs = Date.now();
+    let classified = await deps.classify(ai, resolvedText, historyContext || undefined);
+    logDuration("classification", classificationStartMs);
+
+    // Resolve only genuinely context-dependent requests. This keeps local
+    // acknowledgements and simple questions off the extra LLM rewrite path.
+    if (historyContext && isTranscriptContextDependent(text, classified)) {
+      const contextStartMs = Date.now();
       const expanded = await resolveTranscriptWithContext(ai, text, historyContext);
+      logDuration("context_resolution", contextStartMs);
       if (expanded !== text) {
         resolvedText = expanded;
         console.log(`[Orchestrator] Context-resolved: "${text}" → "${resolvedText}"`);
         session.send({ type: "action_status", message: `Context: ${resolvedText}` });
+        classificationStartMs = Date.now();
+        classified = await deps.classify(ai, resolvedText, historyContext || undefined);
+        logDuration("classification_after_context", classificationStartMs);
       }
     }
-
-    const classified = await deps.classify(ai, resolvedText, historyContext || undefined);
 
     // When the model genuinely can't determine intent, ask the user for clarification
     // rather than guessing. The session stays alive; the next text_input resumes the turn.
     if (classified.intent === "clarify") {
+      logElapsed("routing");
       const question =
         classified.clarification ||
         "Could you give me a bit more detail about what you'd like me to do?";
@@ -1218,36 +1335,59 @@ export async function handleTranscriptFinal(
       return; // Do NOT send "done" — session remains open for the user's reply
     }
 
-    const result: IntentResult = classified;
+    const detectedTool = detectExplicitIntegrationTool(resolvedText);
+    const shouldPreserveIntegrationRouting = isPotentialPrivateIntegrationRequest(
+      classified.intent,
+      resolvedText
+    );
+    const result: IntentResult =
+      (detectedTool || shouldPreserveIntegrationRouting) &&
+      classified.intent === "quick_answer"
+        ? {
+            ...classified,
+            intent: "search",
+            answer: undefined,
+            needs_web_search: undefined,
+          }
+        : classified;
     session.send({ type: "intent", intent: result });
 
     if (result.intent === "quick_answer") {
+      logElapsed("routing");
       let answer: string;
 
-      if (result.needs_web_search && env.TAVILY_API_KEY) {
+      if (result.needs_web_search && deps.tavilyApiKey) {
         // Fast web search path: use Tavily for live data and avoid an extra
         // OpenRouter synthesis/refinement call on the latency-sensitive voice path.
         session.send({ type: "action_status", message: "Searching the web..." });
-        const tavilyResult = await tavilySearch(
+        const toolStartMs = Date.now();
+        const tavilyResult = await deps.fastSearch(
           resolvedText,
-          env.TAVILY_API_KEY,
+          deps.tavilyApiKey,
           (msg) => session.send({ type: "action_status", message: msg })
         );
+        logDuration("tool_execution", toolStartMs);
 
         if (tavilyResult && tavilyResult.summary) {
           answer = normalizeNarrationText(tavilyResult.summary);
         } else {
           answer = result.answer || "I wasn't able to find a current answer to that.";
         }
+      } else if (result.needs_web_search) {
+        answer = "Fast web search is not configured yet, so I can't give a current answer.";
       } else {
+        const generationStartMs = Date.now();
         answer =
           result.answer ||
           await generateGeneralQuickAnswer(ai, resolvedText, historyContext || undefined);
+        if (!result.answer) {
+          logDuration("quick_answer_generation", generationStartMs);
+        }
       }
 
       session.setState("speaking");
       const spokenAnswer = toCoreNarrationText(answer);
-      await deps.narrate(session, answer, apiKey, spokenAnswer);
+      await narrateResponse(answer, spokenAnswer);
       // Push history and compact in the background — don't block the done event.
       if (history) {
         history.recentTurns.push({ transcript: text, response: answer });
@@ -1273,15 +1413,18 @@ export async function handleTranscriptFinal(
 
       session.send({ type: "action_status", message: policyDecision.message });
       session.setState("speaking");
-      await deps.narrate(session, policyDecision.message, apiKey);
+      await narrateResponse(policyDecision.message);
       session.setState("idle");
       session.send({ type: "done" });
       return;
     }
 
-    // web_extract and multi_site_compare route directly to runTool() and don't
-    // need integration routing — skip the generateToolPlan Gemini call for them.
-    const needsToolPlan = result.intent !== "web_extract" && result.intent !== "multi_site_compare";
+    const routingStartMs = Date.now();
+    const needsToolPlan =
+      !detectedTool &&
+      (deps.enableLlmToolGuide || shouldPreserveIntegrationRouting) &&
+      result.intent !== "web_extract" &&
+      result.intent !== "multi_site_compare";
     const toolPlan = needsToolPlan
       ? await generateToolPlan(ai, resolvedText, result.intent, historyContext || undefined)
       : null;
@@ -1294,6 +1437,63 @@ export async function handleTranscriptFinal(
           ? `Using ${toolPlan.integrations.join(", ")} → ${toolPlan.reasoning}`
           : toolPlan.reasoning,
       });
+    }
+
+    let integrationOptions: {
+      forceIntegration?: boolean;
+      preferredToolId?: ToolId;
+      integrationInstruction?: string;
+    } = {};
+
+    const deterministicIntegrationOptions = detectedTool
+      ? buildIntegrationOptionsFromTool(detectedTool, resolvedText, "deterministic keyword match")
+      : null;
+    if (deterministicIntegrationOptions) {
+      integrationOptions = deterministicIntegrationOptions;
+    } else if (toolPlan && toolPlan.strategy !== "browser_only" && toolPlan.integrations.length > 0) {
+      const primaryIntegration = toolPlan.integrations[0];
+      const mappedToolId = mapToolPlanIntegrationToToolId(primaryIntegration);
+      const plannedIntegrationOptions = mappedToolId
+        ? buildIntegrationOptionsFromTool(mappedToolId, resolvedText, `tool plan: "${primaryIntegration}"`)
+        : null;
+      if (plannedIntegrationOptions) {
+        integrationOptions = plannedIntegrationOptions;
+      }
+    }
+
+    const useFastSearchRoute =
+      !integrationOptions.preferredToolId &&
+      deps.tavilyApiKey.length > 0 &&
+      !shouldPreserveIntegrationRouting &&
+      isReadOnlyFastSearchRequest(result.intent, resolvedText);
+    logDuration("routing", routingStartMs);
+
+    if (useFastSearchRoute) {
+      session.setState("acting");
+      session.send({ type: "action_status", message: "Searching the web..." });
+      const toolStartMs = Date.now();
+      const tavilyResult = await deps.fastSearch(
+        resolvedText,
+        deps.tavilyApiKey,
+        (msg) => session.send({ type: "action_status", message: msg })
+      );
+      logDuration("tool_execution", toolStartMs);
+
+      const answer = tavilyResult?.summary
+        ? normalizeNarrationText(tavilyResult.summary)
+        : "I wasn't able to find a current answer to that.";
+      const spokenAnswer = toCoreNarrationText(answer);
+      session.setState("speaking");
+      await narrateResponse(answer, spokenAnswer);
+      if (history) {
+        history.recentTurns.push({ transcript: text, response: answer });
+        maybeCompactHistory(ai, history).catch((err) =>
+          console.error("[Orchestrator] Background compaction error (fast_search):", err)
+        );
+      }
+      session.setState("idle");
+      session.send({ type: "done" });
+      return;
     }
 
     session.setState("acting");
@@ -1313,6 +1513,7 @@ export async function handleTranscriptFinal(
 
     if (result.intent === "web_extract" || result.intent === "multi_site_compare") {
       try {
+        const toolStartMs = Date.now();
         const toolResult = await runTool(
           result.intent,
           {
@@ -1323,13 +1524,14 @@ export async function handleTranscriptFinal(
           },
           createPolicyConfig(navigationAllowlist, env.ALLOW_FINAL_FORM_SUBMISSION)
         );
+        logDuration("tool_execution", toolStartMs);
         output = toolResult.output;
       } catch (err) {
         if (err instanceof ToolPolicyBlockedError) {
           logPolicyBlock({ reason: "dangerous_action", intent: result.intent, query: result.query });
           session.send({ type: "action_status", message: err.userMessage });
           session.setState("speaking");
-          await deps.narrate(session, err.userMessage, apiKey);
+          await narrateResponse(err.userMessage);
           session.setState("idle");
           session.send({ type: "done" });
           return;
@@ -1339,45 +1541,7 @@ export async function handleTranscriptFinal(
       }
     } else {
       try {
-        // Resolve integration options from the tool guide's plan.
-        // When Gemini identified a specific integration (Gmail, Slack, etc.),
-        // pass it through to the browser adapter so BrowserUse uses that
-        // connected integration instead of generic web navigation.
-        let integrationOptions: {
-          forceIntegration?: boolean;
-          preferredToolId?: ToolId;
-          integrationInstruction?: string;
-        } = {};
-
-        if (toolPlan && toolPlan.strategy !== "browser_only" && toolPlan.integrations.length > 0) {
-          const primaryIntegration = toolPlan.integrations[0];
-          const mappedToolId = mapToolPlanIntegrationToToolId(primaryIntegration);
-          if (mappedToolId && INTEGRATION_TOOL_IDS.has(mappedToolId)) {
-            const instruction = buildIntegrationInstructionForTool(mappedToolId, resolvedText);
-            integrationOptions = {
-              forceIntegration: true,
-              preferredToolId: mappedToolId,
-              integrationInstruction: instruction,
-            };
-            console.log(`[Orchestrator] Routing to integration: ${mappedToolId} (from tool plan: "${primaryIntegration}")`);
-          }
-        }
-
-        // Hard fallback: if Gemini returned browser_only but the user's request
-        // clearly targets a connected integration (e.g. "check my email"), override it.
-        if (!integrationOptions.preferredToolId) {
-          const detectedTool = detectExplicitIntegrationTool(resolvedText);
-          if (detectedTool) {
-            const instruction = buildIntegrationInstructionForTool(detectedTool, resolvedText);
-            integrationOptions = {
-              forceIntegration: true,
-              preferredToolId: detectedTool,
-              integrationInstruction: instruction,
-            };
-            console.log(`[Orchestrator] Hard-override to integration: ${detectedTool} (keyword match on "${resolvedText}")`);
-          }
-        }
-
+        const toolStartMs = Date.now();
         if (result.intent === "search") {
           output = await browser.runSearch(taskQuery, statusCb, integrationOptions);
         } else {
@@ -1386,6 +1550,7 @@ export async function handleTranscriptFinal(
             ...integrationOptions,
           });
         }
+        logDuration("tool_execution", toolStartMs);
       } catch (err) {
         console.error("[Orchestrator] Browser error:", err);
         output = "Browser task failed. " + (err instanceof Error ? err.message : "");
@@ -1394,12 +1559,10 @@ export async function handleTranscriptFinal(
 
     session.setBrowserAdapter(null);
     session.setState("speaking");
-    // refineOutputWithGemini now produces both the display text and a spoken
-    // summary in a single Gemini call, saving a sequential round-trip.
-    const { displayText: refinedOutput, spokenSummary } = await deps.refineOutput(
-      ai, resolvedText, output, historyContext || undefined
-    );
-    await deps.narrate(session, refinedOutput, apiKey, spokenSummary);
+    const { displayText: refinedOutput, spokenSummary } = deps.enableOutputRefinement
+      ? await deps.refineOutput(ai, resolvedText, output, historyContext || undefined)
+      : responseFromRawOutput(output);
+    await narrateResponse(refinedOutput, spokenSummary);
 
     // Push history and compact in the background — don't block the done event.
     if (history) {
@@ -1418,5 +1581,7 @@ export async function handleTranscriptFinal(
       message: err instanceof Error ? err.message : "Unknown orchestrator error",
     });
     session.setState("idle");
+  } finally {
+    logElapsed("turn_total");
   }
 }

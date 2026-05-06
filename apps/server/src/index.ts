@@ -13,7 +13,10 @@ import { createSessionsRouter } from "./routes/sessions.js";
 import { Session } from "./ws/session.js";
 
 // -- OpenRouter AI client --
-const ai = createAiClient(env.OPENROUTER_API_KEY);
+const ai = createAiClient(env.OPENROUTER_API_KEY, {
+  models: env.OPENROUTER_MODELS,
+  timeoutMs: env.OPENROUTER_TIMEOUT_MS,
+});
 
 // -- Express --
 const app = express();

@@ -220,7 +220,9 @@ export class Session {
     console.log(`[session:${this.id}] Audio stream ended`);
 
     if (this.stt) {
+      const sttCloseStartMs = Date.now();
       await this.stt.closeGracefully();
+      console.log(`[Latency] stt_close_ms=${Date.now() - sttCloseStartMs}`);
       this.stt = null;
     }
 
