@@ -193,9 +193,11 @@ export class SttAdapter {
     if (!pcmData.length) return "";
 
     const wavData = this.buildWav(pcmData);
+    const wavBytes = new Uint8Array(wavData.length);
+    wavBytes.set(wavData);
 
     const formData = new FormData();
-    formData.append("file", new Blob([wavData], { type: "audio/wav" }), "audio.wav");
+    formData.append("file", new Blob([wavBytes], { type: "audio/wav" }), "audio.wav");
     formData.append("model_id", "scribe_v1");
     formData.append("language_code", "en");
 

@@ -27,7 +27,7 @@ export function MarkdownResponse({ text }: MarkdownResponseProps) {
       e.preventDefault();
       const href = anchor.getAttribute("href");
       if (href) {
-        window.desktop?.openExternalUrl(href);
+        window.desktop?.openExternalUrl?.(href);
       }
     }
   };

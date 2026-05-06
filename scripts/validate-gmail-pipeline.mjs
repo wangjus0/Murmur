@@ -24,7 +24,7 @@ async function createSession() {
       "X-Browser-Use-API-Key": API_KEY,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ task: TASK, profile_id: PROFILE_ID }),
+    body: JSON.stringify({ task: TASK, profileId: PROFILE_ID }),
   });
 
   if (!res.ok) {

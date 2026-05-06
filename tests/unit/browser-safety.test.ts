@@ -267,3 +267,44 @@ test("v3 runSearch session body never contains skillIds or systemPromptExtension
     globalThis.fetch = originalFetch;
   }
 });
+
+test("v3 runSearch sends profileId using Browser Use API field casing", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedBody: Record<string, unknown> | null = null;
+
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = (init?.method ?? "GET").toUpperCase();
+
+    if (method === "POST" && url.includes("/sessions")) {
+      capturedBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(JSON.stringify({ id: "sess_v3_profile" }), { status: 200 });
+    }
+
+    if (method === "GET" && url.includes("/sessions/sess_v3_profile")) {
+      return new Response(
+        JSON.stringify({ status: "stopped", output: "Task complete." }),
+        { status: 200 }
+      );
+    }
+
+    if (method === "DELETE") {
+      return new Response(null, { status: 200 });
+    }
+
+    throw new Error(`Unexpected fetch call: ${method} ${url}`);
+  }) as typeof fetch;
+
+  try {
+    const adapter = new BrowserAdapter("bu_test_integration_key", {
+      profileId: "2b965c08-396a-4dea-8255-950b2df13c8a",
+    });
+    await adapter.runSearch("check unread emails", { onStatus: () => {} });
+
+    assert.ok(capturedBody !== null);
+    assert.equal(capturedBody?.profileId, "2b965c08-396a-4dea-8255-950b2df13c8a");
+    assert.equal(capturedBody?.profile_id, undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
