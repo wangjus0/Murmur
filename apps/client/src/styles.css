@@ -1536,8 +1536,15 @@ body.runtime-macos .app-window-drag-handle {
 }
 
 .voice-popover-shell--browser-preview {
-  width: min(100%, 740px);
+  --voice-browser-preview-width: 720px;
+  --voice-browser-preview-height: 520px;
+  width: min(100%, calc(var(--voice-browser-preview-width) + 20px));
   padding-inline: 8px;
+}
+
+.voice-popover-shell--browser-preview-expanded {
+  --voice-browser-preview-width: 1100px;
+  --voice-browser-preview-height: 720px;
 }
 
 .voice-meter-pill {
@@ -1925,9 +1932,9 @@ body.runtime-macos .app-window-drag-handle {
 }
 
 .voice-browser-preview {
-  width: min(720px, calc(100vw - 20px));
-  height: min(520px, calc(100vh - 36px));
-  min-height: 320px;
+  width: min(var(--voice-browser-preview-width), calc(100vw - 20px));
+  height: min(var(--voice-browser-preview-height), calc(100vh - 36px));
+  min-height: min(320px, calc(100vh - 36px));
   order: 1;
   display: grid;
   grid-template-rows: 40px minmax(0, 1fr);
@@ -1941,6 +1948,15 @@ body.runtime-macos .app-window-drag-handle {
   -webkit-app-region: no-drag;
   transform-origin: bottom center;
   animation: response-fade-in 0.22s var(--easing-standard) both;
+  transition: width var(--duration-base) var(--ease-out-quint),
+    height var(--duration-base) var(--ease-out-quint),
+    box-shadow var(--duration-base) var(--ease-out-quint);
+}
+
+.voice-browser-preview--expanded {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 20px 54px rgba(0, 0, 0, 0.48);
 }
 
 .voice-browser-preview-toolbar {
@@ -2030,6 +2046,19 @@ body.runtime-macos .app-window-drag-handle {
   min-height: 0;
   overflow: hidden;
   background: #05070a;
+}
+
+.voice-browser-preview-frame[role="button"] {
+  cursor: zoom-in;
+}
+
+.voice-browser-preview--expanded .voice-browser-preview-frame[role="button"] {
+  cursor: zoom-out;
+}
+
+.voice-browser-preview-frame:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--voice-accent-working) 72%, #ffffff 28%);
 }
 
 .voice-browser-preview-frame iframe,

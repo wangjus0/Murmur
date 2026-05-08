@@ -743,6 +743,110 @@ test("browser-required transcript flows through browser action, direct narration
   assert.equal(browserViews[0].liveUrl, "https://live.browser-use.com/sess_live_preview");
 });
 
+test("explicit Browser Use transcript routes through browser action", async () => {
+  const session = new FakeSession();
+  const browserCalls: string[] = [];
+  const narratedTexts: string[] = [];
+  const request = "Can you use browser use to open YouTube and then, uh, search UCSD and click on the first video? (clicks)";
+
+  const ai = {
+    models: {
+      generateContent: async () => {
+        throw new Error("OpenRouter should not be called for deterministic Browser Use routing");
+      },
+    },
+  } as unknown as GoogleGenAI;
+
+  await handleTranscriptFinal(
+    session,
+    ai,
+    "elevenlabs-test-key",
+    request,
+    undefined,
+    {
+      createBrowserAdapter: () => ({
+        runSearch: async (query, callbacks) => {
+          browserCalls.push(query);
+          callbacks.onStatus("Opening YouTube");
+          return "Opened YouTube, searched UCSD, and clicked the first video.";
+        },
+        runFormFillDraft: async () => {
+          throw new Error("Unexpected form fill path");
+        },
+      }),
+      narrate: async (narrationSession, text) => {
+        narratedTexts.push(text);
+        narrationSession.send({ type: "narration_text", text });
+      },
+      enableLlmToolGuide: false,
+      enableOutputRefinement: false,
+      browserApiKey: "browser-use-test-key",
+    }
+  );
+
+  assert.deepEqual(session.states, ["thinking", "acting", "speaking", "idle"]);
+  assert.deepEqual(browserCalls, [request]);
+  assert.deepEqual(narratedTexts, [
+    "Opened YouTube, searched UCSD, and clicked the first video.",
+  ]);
+  assert.deepEqual(
+    session.events.map((event) => event.type),
+    ["intent", "action_status", "narration_text", "done"]
+  );
+});
+
+test("browser action transcript with leading filler routes through browser action", async () => {
+  const session = new FakeSession();
+  const browserCalls: string[] = [];
+  const narratedTexts: string[] = [];
+  const request = "Uh, could you go to YouTube, and then search up UCSD, and then click on the first video?";
+
+  const ai = {
+    models: {
+      generateContent: async () => {
+        throw new Error("OpenRouter should not be called for deterministic browser action routing");
+      },
+    },
+  } as unknown as GoogleGenAI;
+
+  await handleTranscriptFinal(
+    session,
+    ai,
+    "elevenlabs-test-key",
+    request,
+    undefined,
+    {
+      createBrowserAdapter: () => ({
+        runSearch: async (query, callbacks) => {
+          browserCalls.push(query);
+          callbacks.onStatus("Opening YouTube");
+          return "Opened YouTube, searched UCSD, and clicked the first video.";
+        },
+        runFormFillDraft: async () => {
+          throw new Error("Unexpected form fill path");
+        },
+      }),
+      narrate: async (narrationSession, text) => {
+        narratedTexts.push(text);
+        narrationSession.send({ type: "narration_text", text });
+      },
+      enableLlmToolGuide: false,
+      enableOutputRefinement: false,
+      browserApiKey: "browser-use-test-key",
+    }
+  );
+
+  assert.deepEqual(session.states, ["thinking", "acting", "speaking", "idle"]);
+  assert.deepEqual(browserCalls, [request]);
+  assert.deepEqual(narratedTexts, [
+    "Opened YouTube, searched UCSD, and clicked the first video.",
+  ]);
+  assert.deepEqual(
+    session.events.map((event) => event.type),
+    ["intent", "action_status", "narration_text", "done"]
+  );
+});
+
 test("browser output keeps full display text while shortening spoken summary", async () => {
   const session = new FakeSession();
   const narratedTexts: string[] = [];
