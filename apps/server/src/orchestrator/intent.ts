@@ -48,6 +48,9 @@ const LIVE_LOOKUP_PATTERN =
 const BROWSER_TARGET_PATTERN =
   /\b(https?:\/\/|website|webpage)\b|\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s]*)?\b|\b(?:this|that|the)\s+(?:page|site)\b/i;
 
+const EXPLICIT_BROWSER_AUTOMATION_PATTERN =
+  /\b(?:use|using|run|start)\s+(?:the\s+)?(?:browser\s*use|browser\s+task|browser\s+automation)\b.*\b(?:open|go to|navigate|click|login|log in|sign in|buy|purchase|order|book|schedule|send|reply|fill|submit|register|apply|download|upload)\b/i;
+
 const TOOL_ACTION_COMMAND_PATTERN =
   /^(?:(?:can|could|would)\s+you\s+|please\s+)?(?:open|go to|navigate|click|login|log in|sign in|buy|purchase|order|book|schedule|send|reply|fill|submit|register|apply|download|upload)\b/i;
 
@@ -72,15 +75,23 @@ function stripTrailingPunctuation(text: string): string {
   return text.replace(/[.!?]+$/g, "").trim();
 }
 
+function stripLeadingSpeechFiller(text: string): string {
+  return text
+    .replace(/^(?:(?:uh+|um+|erm|er|ah+|hmm+|okay|ok|so|hey|hi|hello|like)\b[\s,.:;-]*)+/i, "")
+    .trim();
+}
+
 function requiresBrowserAutomation(transcript: string): boolean {
+  const commandText = stripLeadingSpeechFiller(transcript);
   return (
-    BROWSER_TARGET_PATTERN.test(transcript) ||
-    TOOL_ACTION_COMMAND_PATTERN.test(transcript)
+    EXPLICIT_BROWSER_AUTOMATION_PATTERN.test(commandText) ||
+    BROWSER_TARGET_PATTERN.test(commandText) ||
+    TOOL_ACTION_COMMAND_PATTERN.test(commandText)
   );
 }
 
 function requestsExternalRetrieval(transcript: string): boolean {
-  return EXTERNAL_RETRIEVAL_COMMAND_PATTERN.test(transcript);
+  return EXTERNAL_RETRIEVAL_COMMAND_PATTERN.test(stripLeadingSpeechFiller(transcript));
 }
 
 function parseNumberToken(token: string): number | null {

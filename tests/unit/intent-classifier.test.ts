@@ -156,6 +156,54 @@ test("classifyIntent keeps browser actions on search path", async () => {
   });
 });
 
+test("classifyIntent ignores leading speech fillers before browser actions", async () => {
+  let calls = 0;
+  const request = "Uh, could you go to YouTube, and then search up UCSD, and then click on the first video?";
+  const result = await classifyIntent(
+    createFailingAi(() => { calls += 1; }),
+    request
+  );
+
+  assert.equal(calls, 0);
+  assert.deepEqual(result, {
+    intent: "search",
+    confidence: 0.72,
+    query: request,
+  });
+});
+
+test("classifyIntent keeps explicit Browser Use requests on browser search path", async () => {
+  let calls = 0;
+  const request = "Can you use browser use to open YouTube and then, uh, search UCSD and click on the first video? (clicks)";
+  const result = await classifyIntent(
+    createFailingAi(() => { calls += 1; }),
+    request
+  );
+
+  assert.equal(calls, 0);
+  assert.deepEqual(result, {
+    intent: "search",
+    confidence: 0.72,
+    query: request,
+  });
+});
+
+test("classifyIntent treats informational Browser Use questions as quick answers", async () => {
+  let calls = 0;
+  const result = await classifyIntent(
+    createFailingAi(() => { calls += 1; }),
+    "what is Browser Use?"
+  );
+
+  assert.equal(calls, 0);
+  assert.deepEqual(result, {
+    intent: "quick_answer",
+    confidence: 0.72,
+    query: "what is Browser Use?",
+    needs_web_search: false,
+  });
+});
+
 test("classifyIntent handles conversational acknowledgements locally", async () => {
   let calls = 0;
   const result = await classifyIntent(createFailingAi(() => { calls += 1; }), "That's great.");

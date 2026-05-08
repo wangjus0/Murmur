@@ -24,6 +24,26 @@ test("search task prompt stays focused on read-only retrieval", () => {
   assert.doesNotMatch(prompt, /\bcheckout\b/i);
 });
 
+test("site navigation search prompt follows the target site instead of searching the full request", () => {
+  const prompt = buildSearchTaskPrompt(
+    'Uh, could you go to YouTube, search up "UCSD," and then click on the first video that you see?'
+  );
+
+  assert.match(prompt, /Follow this browser automation request exactly/i);
+  assert.match(prompt, /open that destination directly instead of searching Google for the whole request/i);
+  assert.match(prompt, /use that destination's own search field/i);
+  assert.match(prompt, /search only the requested terms/i);
+  assert.doesNotMatch(prompt, /Navigate to google\.com, search for/i);
+  assert.match(prompt, /Do not perform payment, checkout, purchase/i);
+});
+
+test("search prompt does not treat open source as an open-site command", () => {
+  const prompt = buildSearchTaskPrompt("search for open source license comparisons");
+
+  assert.match(prompt, /Navigate to google\.com, search for/i);
+  assert.doesNotMatch(prompt, /Follow this browser automation request exactly/i);
+});
+
 test("integration-first search prompt avoids forced google search", () => {
   const prompt = buildSearchTaskPrompt("summarize my unread emails", {
     preferredToolId: "gmail",

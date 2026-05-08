@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import { useSession } from "../../hooks/useSession";
 import { useSessionStore } from "../../store/session";
 import { useAudioPlayer } from "../narration/useAudioPlayer";
@@ -6,7 +13,7 @@ import { useMicrophone } from "./useMicrophone";
 import { TextContextPanel } from "./TextContextPanel";
 import { ClarificationCard } from "./ClarificationCard";
 import { MarkdownResponse } from "./MarkdownResponse";
-import { resolvePopoverHeight } from "./voicePopoverLayout";
+import { resolveBrowserPreviewSize, resolvePopoverHeight } from "./voicePopoverLayout";
 
 // Delay (in ms) before the renderer is allowed to send repositionPopover /
 // resizePopover IPC calls after mount. This gives the main process time to
@@ -22,8 +29,6 @@ const WORKING_EXPANDED_WIDTH = 280;
 const WORKING_EXPANDED_HEIGHT = 96;
 const WORKING_NOTCH_WIDTH = 96;
 const WORKING_NOTCH_HEIGHT = 20;
-const BROWSER_PREVIEW_WIDTH = 760;
-const BROWSER_PREVIEW_HEIGHT = 560;
 const REDUCED_MOTION_BAR_SCALE = [0.2, 0.32, 0.48, 0.62, 0.5, 0.62, 0.48, 0.32, 0.2];
 
 export function VoicePopover() {
@@ -39,6 +44,7 @@ export function VoicePopover() {
   const [barScales, setBarScales] = useState<number[]>(FLAT_SCALE);
   const [workingElapsed, setWorkingElapsed] = useState(0);
   const [workingExpanded, setWorkingExpanded] = useState(false);
+  const [browserPreviewExpanded, setBrowserPreviewExpanded] = useState(false);
   const [overlayCollapsed, setOverlayCollapsed] = useState(false);
   const [expandingFromNotch, setExpandingFromNotch] = useState(false);
   const [entered, setEntered] = useState(false);
@@ -269,6 +275,31 @@ export function VoicePopover() {
               ? "Processing..."
               : "Press Space";
   const browserPreviewStatus = browserView?.lastStepSummary || browserView?.status || statusMessage;
+  const browserPreviewSizeLabel = browserPreviewExpanded ? "Restore browser preview size" : "Enlarge browser preview";
+
+  const getBrowserPreviewWindowSize = useCallback(() => {
+    if (typeof window === "undefined") {
+      return resolveBrowserPreviewSize({ expanded: browserPreviewExpanded });
+    }
+
+    return resolveBrowserPreviewSize({
+      expanded: browserPreviewExpanded,
+      availableWidth: window.screen.availWidth,
+      availableHeight: window.screen.availHeight,
+    });
+  }, [browserPreviewExpanded]);
+
+  const toggleBrowserPreviewSize = useCallback(() => {
+    if (!showBrowserPreview) return;
+    setBrowserPreviewExpanded((expanded) => !expanded);
+  }, [showBrowserPreview]);
+
+  const handleBrowserPreviewFrameKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    event.stopPropagation();
+    toggleBrowserPreviewSize();
+  }, [toggleBrowserPreviewSize]);
 
   // Bump statusKey to re-trigger fade animation when text changes
   useEffect(() => {
@@ -298,9 +329,20 @@ export function VoicePopover() {
   useEffect(() => {
     if (isWorking && !prevWorkingRef.current) {
       setWorkingExpanded(false);
+      setBrowserPreviewExpanded(false);
+    }
+
+    if (!isWorking) {
+      setBrowserPreviewExpanded(false);
     }
     prevWorkingRef.current = isWorking;
   }, [isWorking]);
+
+  useEffect(() => {
+    if (!showBrowserPreview) {
+      setBrowserPreviewExpanded(false);
+    }
+  }, [showBrowserPreview]);
 
   useEffect(() => {
     const unsub = window.desktop?.shortcut?.onPopoverCollapsedChange?.((collapsed) => {
@@ -319,6 +361,7 @@ export function VoicePopover() {
 
     if (overlayCollapsed) {
       setExpandingFromNotch(false);
+      setBrowserPreviewExpanded(false);
     }
 
     prevOverlayCollapsedRef.current = overlayCollapsed;
@@ -495,16 +538,9 @@ export function VoicePopover() {
     }
 
     if (isWorking) {
-      const width = showBrowserPreview
-        ? BROWSER_PREVIEW_WIDTH
-        : workingExpanded
-          ? WORKING_EXPANDED_WIDTH
-          : WORKING_NOTCH_WIDTH;
-      const height = showBrowserPreview
-        ? BROWSER_PREVIEW_HEIGHT
-        : workingExpanded
-          ? WORKING_EXPANDED_HEIGHT
-          : WORKING_NOTCH_HEIGHT;
+      const browserPreviewSize = showBrowserPreview ? getBrowserPreviewWindowSize() : null;
+      const width = browserPreviewSize?.width ?? (workingExpanded ? WORKING_EXPANDED_WIDTH : WORKING_NOTCH_WIDTH);
+      const height = browserPreviewSize?.height ?? (workingExpanded ? WORKING_EXPANDED_HEIGHT : WORKING_NOTCH_HEIGHT);
       // Keep bottom edge fixed while shrinking/expanding and then snap to
       // bottom-center so the notch/pill never drifts or disappears.
       window.desktop?.shortcut?.resizePopover?.(width, height, true);
@@ -536,7 +572,7 @@ export function VoicePopover() {
     window.desktop?.shortcut?.repositionPopover?.("center");
     // For textPanelOpen: grow upward so the panel above the pill stays visible.
     window.desktop?.shortcut?.resizePopover?.(430, targetHeight, growUpward);
-  }, [showResponseCard, textPanelOpen, effectiveState, isWorking, workingExpanded, showBrowserPreview, clarificationQuestion, overlayCollapsed, ipcLayoutReadyTick, measurePopoverHeight]);
+  }, [showResponseCard, textPanelOpen, effectiveState, isWorking, workingExpanded, showBrowserPreview, clarificationQuestion, overlayCollapsed, ipcLayoutReadyTick, measurePopoverHeight, getBrowserPreviewWindowSize]);
 
   // Re-apply the correct window size whenever the popover is toggled back on.
   // When the overlay is hidden and re-shown, the main process resets the window
@@ -562,16 +598,9 @@ export function VoicePopover() {
       }
 
       if (isWorking) {
-        const width = showBrowserPreview
-          ? BROWSER_PREVIEW_WIDTH
-          : workingExpanded
-            ? WORKING_EXPANDED_WIDTH
-            : WORKING_NOTCH_WIDTH;
-        const height = showBrowserPreview
-          ? BROWSER_PREVIEW_HEIGHT
-          : workingExpanded
-            ? WORKING_EXPANDED_HEIGHT
-            : WORKING_NOTCH_HEIGHT;
+        const browserPreviewSize = showBrowserPreview ? getBrowserPreviewWindowSize() : null;
+        const width = browserPreviewSize?.width ?? (workingExpanded ? WORKING_EXPANDED_WIDTH : WORKING_NOTCH_WIDTH);
+        const height = browserPreviewSize?.height ?? (workingExpanded ? WORKING_EXPANDED_HEIGHT : WORKING_NOTCH_HEIGHT);
         window.desktop?.shortcut?.resizePopover?.(width, height, true);
         window.desktop?.shortcut?.repositionPopover?.("bottom-center");
         return;
@@ -589,7 +618,7 @@ export function VoicePopover() {
       window.desktop?.shortcut?.resizePopover?.(430, targetHeight, textPanelOpen);
     });
     return () => unsub?.();
-  }, [showResponseCard, textPanelOpen, effectiveState, isWorking, workingExpanded, showBrowserPreview, clarificationQuestion, overlayCollapsed, measurePopoverHeight]);
+  }, [showResponseCard, textPanelOpen, effectiveState, isWorking, workingExpanded, showBrowserPreview, clarificationQuestion, overlayCollapsed, measurePopoverHeight, getBrowserPreviewWindowSize]);
 
   // Animate bars when speaking, go flat when idle
   useEffect(() => {
@@ -683,6 +712,7 @@ export function VoicePopover() {
     useSessionStore.getState().setNarrationText("");
     useSessionStore.getState().setClarificationQuestion(null);
     useSessionStore.getState().clearBrowserView();
+    setBrowserPreviewExpanded(false);
     silenceStartRef.current = null;
     hasSpokenRef.current = false;
     const started = await startRecording();
@@ -702,6 +732,7 @@ export function VoicePopover() {
     state.clearBrowserView();
     setBarScales(FLAT_SCALE);
     setWorkingExpanded(false);
+    setBrowserPreviewExpanded(false);
   }, [animatePillTap, sendInterrupt]);
 
   const closePopover = useCallback(() => {
@@ -715,6 +746,8 @@ export function VoicePopover() {
     audioPlayer.stop();
     useSessionStore.getState().reset();
     setBarScales(FLAT_SCALE);
+    setWorkingExpanded(false);
+    setBrowserPreviewExpanded(false);
     window.desktop?.shortcut?.closePopover();
   }, [audioPlayer, stopRecording]);
 
@@ -726,7 +759,12 @@ export function VoicePopover() {
         setTextPanelOpen(false);
         return;
       }
+      if (isWorking && showBrowserPreview && browserPreviewExpanded) {
+        setBrowserPreviewExpanded(false);
+        return;
+      }
       if (isWorking && workingExpanded) {
+        setBrowserPreviewExpanded(false);
         setWorkingExpanded(false);
         return;
       }
@@ -786,7 +824,10 @@ export function VoicePopover() {
       className={`voice-popover-screen ${showCollapsedNotch ? "voice-popover-screen--notch" : ""} ${expandingFromNotch ? "voice-popover-screen--expanding" : ""} ${prefersReducedMotion ? "voice-popover-screen--reduced-motion" : ""}`}
       onClick={(e) => { if (e.target === e.currentTarget) setTextPanelOpen(false); }}
     >
-      <section ref={shellRef} className={`voice-popover-shell ${entered ? "voice-popover-shell--entered" : ""} ${showBrowserPreview ? "voice-popover-shell--browser-preview" : ""}`}>
+      <section
+        ref={shellRef}
+        className={`voice-popover-shell ${entered ? "voice-popover-shell--entered" : ""} ${showBrowserPreview ? "voice-popover-shell--browser-preview" : ""} ${showBrowserPreview && browserPreviewExpanded ? "voice-popover-shell--browser-preview-expanded" : ""}`}
+      >
         {showNotchVisual && (
           <button
             ref={workingNotchButtonRef}
@@ -831,7 +872,11 @@ export function VoicePopover() {
           </div>
         )}
         {!showCollapsedNotch && showBrowserPreview && browserView && (
-          <div className="voice-browser-preview" role="dialog" aria-label="Browser task preview">
+          <div
+            className={`voice-browser-preview ${browserPreviewExpanded ? "voice-browser-preview--expanded" : ""}`}
+            role="dialog"
+            aria-label="Browser task preview"
+          >
             <div className="voice-browser-preview-toolbar">
               <div className="voice-browser-preview-title">
                 <span className="voice-browser-preview-dot" aria-hidden="true" />
@@ -844,7 +889,10 @@ export function VoicePopover() {
                 <button
                   type="button"
                   className="voice-browser-preview-icon-btn"
-                  onClick={() => setWorkingExpanded(false)}
+                  onClick={() => {
+                    setBrowserPreviewExpanded(false);
+                    setWorkingExpanded(false);
+                  }}
                   title="Collapse to bottom notch"
                   aria-label="Collapse to bottom notch"
                 >
@@ -861,7 +909,16 @@ export function VoicePopover() {
                 </button>
               </div>
             </div>
-            <div className="voice-browser-preview-frame">
+            <div
+              className="voice-browser-preview-frame"
+              role="button"
+              tabIndex={0}
+              title={browserPreviewSizeLabel}
+              aria-label={browserPreviewSizeLabel}
+              aria-pressed={browserPreviewExpanded}
+              onClick={toggleBrowserPreviewSize}
+              onKeyDown={handleBrowserPreviewFrameKeyDown}
+            >
               {browserView.liveUrl ? (
                 <iframe
                   src={browserView.liveUrl}
@@ -915,7 +972,10 @@ export function VoicePopover() {
             <button
               type="button"
               className="voice-cancel-btn voice-working-collapse-btn"
-              onClick={() => setWorkingExpanded(false)}
+              onClick={() => {
+                setBrowserPreviewExpanded(false);
+                setWorkingExpanded(false);
+              }}
               title="Collapse to bottom notch"
               aria-label="Collapse to bottom notch"
             >

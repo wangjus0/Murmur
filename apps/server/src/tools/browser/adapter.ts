@@ -734,9 +734,39 @@ export function buildSearchTaskPrompt(
     });
   }
 
+  if (isDirectBrowserAutomationRequest(query)) {
+    return buildDirectBrowserAutomationTaskPrompt(query);
+  }
+
   return (
     `Navigate to google.com, search for '${query}', and collect the top 5 result titles and URLs. ` +
     `Return results as a numbered list with title and URL for each.`
+  );
+}
+
+function isDirectBrowserAutomationRequest(query: string): boolean {
+  const normalized = stripLeadingSpeechFiller(query.toLowerCase().replace(/\s+/g, " ").trim());
+  return (
+    /^(?:(?:can|could|would)\s+you\s+|please\s+)?(?:open|go to|navigate to|visit|click|tap|press|play|watch|log in|login|sign in)\b/.test(normalized) ||
+    /^(?:(?:can|could|would)\s+you\s+|please\s+)?search\s+(?:up\s+)?(?:youtube|google|google\.com|youtu\.be|https?:\/\/|www\.)\b/.test(normalized) ||
+    /\b(?:https?:\/\/|www\.)\S+/i.test(normalized)
+  );
+}
+
+function stripLeadingSpeechFiller(text: string): string {
+  return text
+    .replace(/^(?:(?:uh+|um+|erm|er|ah+|hmm+|okay|ok|so|hey|hi|hello|like)\b[\s,.:;-]*)+/i, "")
+    .trim();
+}
+
+function buildDirectBrowserAutomationTaskPrompt(query: string): string {
+  return (
+    `Follow this browser automation request exactly: ${query}\n` +
+    `If the request names a website or app, open that destination directly instead of searching Google for the whole request. ` +
+    `If the request says to search within that destination, use that destination's own search field and search only the requested terms. ` +
+    `Then complete the requested click/navigation steps. ` +
+    `Do not perform payment, checkout, purchase, account deletion, or final form submission actions. ` +
+    `Return a concise summary of what you did and the final page/video/title.`
   );
 }
 
