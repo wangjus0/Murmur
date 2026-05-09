@@ -3,5 +3,6 @@ dist/
 dist-electron/
 release/
 apps/server/.env
+.codex/environments/
 .murmur-vite-dev-url
 .murmur-worktree-setup.json
