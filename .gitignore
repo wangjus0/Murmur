@@ -4,5 +4,6 @@ dist-electron/
 release/
 apps/server/.env
 .codex/environments/
+.superset/
 .murmur-vite-dev-url
 .murmur-worktree-setup.json
