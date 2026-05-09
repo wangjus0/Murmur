@@ -14,6 +14,13 @@ import { TextContextPanel } from "./TextContextPanel";
 import { ClarificationCard } from "./ClarificationCard";
 import { MarkdownResponse } from "./MarkdownResponse";
 import { resolveBrowserPreviewSize, resolvePopoverHeight } from "./voicePopoverLayout";
+import { useWakeActivation } from "./useWakeActivation";
+import {
+  isVoiceActivationSettingsEvent,
+  readVoiceActivationEnabled,
+  VOICE_ACTIVATION_SETTINGS_EVENT,
+  VOICE_ACTIVATION_STORAGE_KEY,
+} from "./voiceActivationSettings";
 
 // Delay (in ms) before the renderer is allowed to send repositionPopover /
 // resizePopover IPC calls after mount. This gives the main process time to
@@ -29,6 +36,8 @@ const WORKING_EXPANDED_WIDTH = 280;
 const WORKING_EXPANDED_HEIGHT = 96;
 const WORKING_NOTCH_WIDTH = 96;
 const WORKING_NOTCH_HEIGHT = 20;
+const WAKE_GREETING_TEXT = "Hey, how can I help you?";
+const WAKE_GREETING_VISIBLE_MS = 2800;
 const REDUCED_MOTION_BAR_SCALE = [0.2, 0.32, 0.48, 0.62, 0.5, 0.62, 0.48, 0.32, 0.2];
 
 export function VoicePopover() {
@@ -46,6 +55,11 @@ export function VoicePopover() {
   const [workingExpanded, setWorkingExpanded] = useState(false);
   const [browserPreviewExpanded, setBrowserPreviewExpanded] = useState(false);
   const [overlayCollapsed, setOverlayCollapsed] = useState(false);
+  const [popoverActive, setPopoverActive] = useState(false);
+  const [voiceActivationEnabled, setVoiceActivationEnabled] = useState(() =>
+    readVoiceActivationEnabled()
+  );
+  const [wakeGreetingActive, setWakeGreetingActive] = useState(false);
   const [expandingFromNotch, setExpandingFromNotch] = useState(false);
   const [entered, setEntered] = useState(false);
   const [statusKey, setStatusKey] = useState(0);
@@ -76,6 +90,7 @@ export function VoicePopover() {
   const prevTextPanelOpenStateRef = useRef(false);
   const prevClarificationVisibleRef = useRef(false);
   const prevResponseVisibleRef = useRef(false);
+  const wakeGreetingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Gate all repositionPopover / resizePopover IPC calls until after the main
   // process has finished snapPopoverToCenter(). Without this, effects that fire
@@ -202,6 +217,30 @@ export function VoicePopover() {
   const showCollapsedNotch = overlayCollapsed || showWorkingNotch;
   const showNotchVisual = showCollapsedNotch;
 
+  useEffect(() => {
+    const syncVoiceActivationSetting = () => {
+      setVoiceActivationEnabled(readVoiceActivationEnabled());
+    };
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === VOICE_ACTIVATION_STORAGE_KEY) {
+        syncVoiceActivationSetting();
+      }
+    };
+    const handleSettingsEvent = (event: Event) => {
+      if (!isVoiceActivationSettingsEvent(event)) {
+        return;
+      }
+      setVoiceActivationEnabled(event.detail.enabled);
+    };
+
+    window.addEventListener("storage", handleStorage);
+    window.addEventListener(VOICE_ACTIVATION_SETTINGS_EVENT, handleSettingsEvent);
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener(VOICE_ACTIVATION_SETTINGS_EVENT, handleSettingsEvent);
+    };
+  }, []);
+
   // CSS @keyframes often don’t repaint in the transparent Electron popover; drive motion with rAF.
   useLayoutEffect(() => {
     const motionAllowed =
@@ -263,17 +302,19 @@ export function VoicePopover() {
 
   const statusMessage = error
     ? error
-    : isRecording
-      ? "Listening..."
-      : effectiveState === "thinking"
-        ? workingLabel
-        : effectiveState === "acting"
+    : wakeGreetingActive && effectiveState === "idle" && !isRecording
+      ? WAKE_GREETING_TEXT
+      : isRecording
+        ? "Listening..."
+        : effectiveState === "thinking"
           ? workingLabel
-          : effectiveState === "speaking"
-            ? "Responding..."
-            : effectiveState === "listening"
-              ? "Processing..."
-              : "Press Space";
+          : effectiveState === "acting"
+            ? workingLabel
+            : effectiveState === "speaking"
+              ? "Responding..."
+              : effectiveState === "listening"
+                ? "Processing..."
+                : "Press Space";
   const browserPreviewStatus = browserView?.lastStepSummary || browserView?.status || statusMessage;
   const browserPreviewSizeLabel = browserPreviewExpanded ? "Restore browser preview size" : "Enlarge browser preview";
 
@@ -349,6 +390,24 @@ export function VoicePopover() {
       setOverlayCollapsed(collapsed);
     });
     return () => {
+      unsub?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void window.desktop?.shortcut?.isPopoverActive?.().then((isActive) => {
+      if (active) {
+        setPopoverActive(isActive);
+      }
+    });
+
+    const unsub = window.desktop?.shortcut?.onPopoverActiveChange?.((isActive) => {
+      setPopoverActive(isActive);
+    });
+
+    return () => {
+      active = false;
       unsub?.();
     };
   }, []);
@@ -686,6 +745,43 @@ export function VoicePopover() {
     );
   }, [prefersReducedMotion]);
 
+  const clearWakeGreeting = useCallback(() => {
+    if (wakeGreetingTimeoutRef.current !== null) {
+      clearTimeout(wakeGreetingTimeoutRef.current);
+      wakeGreetingTimeoutRef.current = null;
+    }
+
+    setWakeGreetingActive(false);
+    window.speechSynthesis?.cancel();
+  }, []);
+
+  const playWakeGreeting = useCallback(() => {
+    clearWakeGreeting();
+    setWakeGreetingActive(true);
+
+    if (typeof SpeechSynthesisUtterance !== "undefined" && window.speechSynthesis) {
+      const utterance = new SpeechSynthesisUtterance(WAKE_GREETING_TEXT);
+      utterance.rate = 1;
+      utterance.pitch = 1;
+      window.speechSynthesis.speak(utterance);
+    }
+
+    wakeGreetingTimeoutRef.current = setTimeout(() => {
+      wakeGreetingTimeoutRef.current = null;
+      setWakeGreetingActive(false);
+    }, WAKE_GREETING_VISIBLE_MS);
+  }, [clearWakeGreeting]);
+
+  useEffect(() => {
+    return () => {
+      if (wakeGreetingTimeoutRef.current !== null) {
+        clearTimeout(wakeGreetingTimeoutRef.current);
+        wakeGreetingTimeoutRef.current = null;
+      }
+      window.speechSynthesis?.cancel();
+    };
+  }, []);
+
   useEffect(() => {
     if (prefersReducedMotion) return;
     pillButtonRef.current?.animate(
@@ -701,13 +797,8 @@ export function VoicePopover() {
     );
   }, [effectiveState, isRecording, error, prefersReducedMotion]);
 
-  const toggleRecording = useCallback(async () => {
-    animatePillTap();
-    if (isRecording) {
-      stopRecording();
-      setBarScales(FLAT_SCALE);
-      return;
-    }
+  const beginRecording = useCallback(async () => {
+    clearWakeGreeting();
     setError(null);
     useSessionStore.getState().setNarrationText("");
     useSessionStore.getState().setClarificationQuestion(null);
@@ -719,10 +810,38 @@ export function VoicePopover() {
     if (!started) {
       setBarScales(FLAT_SCALE);
     }
-  }, [animatePillTap, isRecording, setError, startRecording, stopRecording]);
+  }, [clearWakeGreeting, setError, startRecording]);
+
+  const toggleRecording = useCallback(async () => {
+    animatePillTap();
+    if (isRecording) {
+      stopRecording();
+      setBarScales(FLAT_SCALE);
+      return;
+    }
+
+    await beginRecording();
+  }, [animatePillTap, beginRecording, isRecording, stopRecording]);
+
+  const handleWakeDetected = useCallback(async () => {
+    if (isRecordingRef.current || effectiveState !== "idle") {
+      return;
+    }
+
+    await window.desktop?.shortcut?.showPopover?.();
+    setPopoverActive(true);
+    playWakeGreeting();
+  }, [effectiveState, playWakeGreeting]);
+
+  useWakeActivation({
+    enabled: voiceActivationEnabled,
+    canListen: !popoverActive && !isRecording && effectiveState === "idle",
+    onWakeDetected: handleWakeDetected,
+  });
 
   const handleInterrupt = useCallback(() => {
     animatePillTap();
+    clearWakeGreeting();
     sendInterrupt();
     // Optimistic reset to avoid a stuck "Processing..." UI when interrupt
     // acknowledgement arrives late or misses a state transition event.
@@ -733,7 +852,7 @@ export function VoicePopover() {
     setBarScales(FLAT_SCALE);
     setWorkingExpanded(false);
     setBrowserPreviewExpanded(false);
-  }, [animatePillTap, sendInterrupt]);
+  }, [animatePillTap, clearWakeGreeting, sendInterrupt]);
 
   const closePopover = useCallback(() => {
     // Reset session state so that when the popover re-opens the stale
@@ -743,13 +862,14 @@ export function VoicePopover() {
     if (isRecordingRef.current) {
       stopRecording();
     }
+    clearWakeGreeting();
     audioPlayer.stop();
     useSessionStore.getState().reset();
     setBarScales(FLAT_SCALE);
     setWorkingExpanded(false);
     setBrowserPreviewExpanded(false);
     window.desktop?.shortcut?.closePopover();
-  }, [audioPlayer, stopRecording]);
+  }, [audioPlayer, clearWakeGreeting, stopRecording]);
 
   const handleKeyDownRef = useRef<((event: KeyboardEvent) => void) | undefined>(undefined);
   handleKeyDownRef.current = (event: KeyboardEvent) => {

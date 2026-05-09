@@ -25,7 +25,7 @@ test("mergePersistedOnboardingData restores known fields from persisted payload"
       },
       account: { displayName: "Alex", workspaceName: "Murmur" },
       workflow: { primaryGoal: "Automate repetitive tasks", useCases: "Research and drafting" },
-      preferences: { shortcutBehavior: "Open near cursor", notes: "none" },
+      preferences: { shortcutBehavior: "Open near cursor", voiceActivationEnabled: true, notes: "none" },
     },
   });
 
@@ -34,6 +34,17 @@ test("mergePersistedOnboardingData restores known fields from persisted payload"
   assert.equal(result.account.displayName, "Alex");
   assert.equal(result.workflow.primaryGoal, "Automate repetitive tasks");
   assert.equal(result.preferences.shortcutBehavior, "Open near cursor");
+  assert.equal(result.preferences.voiceActivationEnabled, true);
+});
+
+test("voice activation defaults to disabled for older onboarding payloads", () => {
+  const result = mergePersistedOnboardingData({
+    steps: {
+      preferences: { shortcutBehavior: "Cmd+Shift+Space" },
+    },
+  });
+
+  assert.equal(result.preferences.voiceActivationEnabled, false);
 });
 
 test("deriveCurrentStep clamps step index into valid range", () => {

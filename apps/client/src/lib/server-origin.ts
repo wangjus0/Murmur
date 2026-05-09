@@ -7,10 +7,6 @@ export function resolveServerHttpOrigin(
   locationLike: LocationLike,
   desktopSocketUrl?: string
 ): string {
-  if (locationLike.protocol === "https:" || locationLike.protocol === "http:") {
-    return `${locationLike.protocol}//${locationLike.host}`;
-  }
-
   if (desktopSocketUrl) {
     try {
       const parsed = new URL(desktopSocketUrl);
@@ -21,6 +17,10 @@ export function resolveServerHttpOrigin(
     } catch {
       // ignore invalid desktop ws url and fallback below
     }
+  }
+
+  if (locationLike.protocol === "https:" || locationLike.protocol === "http:") {
+    return `${locationLike.protocol}//${locationLike.host}`;
   }
 
   return "http://127.0.0.1:3000";

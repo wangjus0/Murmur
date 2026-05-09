@@ -1315,6 +1315,11 @@ body.runtime-macos .app-window-drag-handle {
   box-shadow: 0 8px 16px rgba(17, 63, 88, 0.16);
 }
 
+.permission-toggle:focus-visible {
+  outline: none;
+  box-shadow: var(--voice-focus-ring);
+}
+
 .permission-toggle:active {
   transform: scale(0.975);
 }
@@ -1339,6 +1344,10 @@ body.runtime-macos .app-window-drag-handle {
 
 .permission-toggle-on::after {
   transform: translateX(24px);
+}
+
+.voice-activation-setting {
+  align-items: center;
 }
 
 .resizable-textarea {

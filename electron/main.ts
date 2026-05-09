@@ -109,6 +109,14 @@ function cancelPopoverAnimations(): void {
   cancelPopoverTransitionAnimation();
 }
 
+function emitPopoverActiveChange(active: boolean): void {
+  if (!voicePopoverWindow || voicePopoverWindow.isDestroyed()) {
+    return;
+  }
+
+  voicePopoverWindow.webContents.send("popover:active-changed", active);
+}
+
 const GLOBAL_SHORTCUT = "CommandOrControl+Shift+Space";
 const DASHBOARD_SHORTCUT = "CommandOrControl+Shift+M";
 
@@ -600,6 +608,7 @@ function getOrCreateVoicePopover(): BrowserWindow {
     voicePopoverIntentVisible = false;
     voicePopoverCollapsed = false;
     voicePopoverExpandingFromNotch = false;
+    emitPopoverActiveChange(false);
     voicePopoverWindow = null;
   });
 
@@ -626,6 +635,7 @@ function showVoicePopover(): void {
   // Mark intent BEFORE show()/animate so that any IPC that fires immediately
   // after sees the correct state.
   voicePopoverIntentVisible = true;
+  emitPopoverActiveChange(true);
 
   // If currently collapsed as a bottom notch, animate back to centered home.
   if (wasCollapsed) {
@@ -687,6 +697,7 @@ function collapseVoicePopoverToNotch(): void {
   cancelPopoverAnimations();
 
   voicePopoverIntentVisible = false;
+  emitPopoverActiveChange(false);
   voicePopoverCollapsed = true;
   voicePopoverExpandingFromNotch = false;
   voicePopoverOpenedAtMs = null;
@@ -749,6 +760,7 @@ function hideVoicePopover(): void {
   // (repositionPopover, resizePopover) that arrives after we call hide()
   // is correctly ignored.
   voicePopoverIntentVisible = false;
+  emitPopoverActiveChange(false);
   voicePopoverCollapsed = false;
   voicePopoverExpandingFromNotch = false;
 
@@ -929,6 +941,8 @@ function registerShortcutIpcHandlers(): void {
     voicePopoverWindow.setSize(newWidth, newHeight);
     voicePopoverWindow.setPosition(oldX + dx, oldY + dy);
   });
+
+  ipcMain.handle("shortcut:is-popover-active", () => voicePopoverIntentVisible);
 }
 
 function wait(ms: number): Promise<void> {
@@ -965,6 +979,7 @@ async function bootstrap(): Promise<void> {
   registerMediaPermissionHandlers();
 
   const mainWin = createMainWindow();
+  getOrCreateVoicePopover();
   mainWin.on("close", (event) => {
     if (!isQuitting) {
       event.preventDefault();

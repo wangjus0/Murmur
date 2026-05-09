@@ -8,6 +8,7 @@ import {
 } from "../../lib/browser-profile";
 import { resolveServerHttpOrigin } from "../../lib/server-origin";
 import { getSupabaseClient } from "../../lib/supabase";
+import { persistVoiceActivationEnabled } from "../voice/voiceActivationSettings";
 import { useAuth } from "./AuthProvider";
 import {
   createDefaultOnboardingData,
@@ -47,7 +48,7 @@ const STEP_META: StepMeta[] = [
   {
     key: "permissions",
     title: "Voice setup",
-    description: "Allow microphone access and pick your audio pill keybind.",
+    description: "Allow microphone access and choose how the audio pill opens.",
   },
 ];
 
@@ -161,6 +162,7 @@ function formatShortcutFromKeyDown(event: ShortcutInputEvent): string | null {
 function AudioSetupStep(props: {
   permissions: OnboardingFormData["permissions"];
   shortcutBehavior: string;
+  voiceActivationEnabled: boolean;
   permissionErrors: StepErrors;
   preferenceErrors: StepErrors;
   checkingStatus: boolean;
@@ -179,6 +181,7 @@ function AudioSetupStep(props: {
   checkingBrowserProfile: boolean;
   browserProfileConnected: boolean;
   onShortcutBehaviorChange: (value: string) => void;
+  onVoiceActivationEnabledChange: (enabled: boolean) => void;
 }) {
   const [isCapturingShortcut, setIsCapturingShortcut] = useState(false);
 
@@ -323,6 +326,22 @@ function AudioSetupStep(props: {
           Press Record to update key combo.
         </p>
         <InlineError id="shortcut-behavior-error" message={props.preferenceErrors.shortcutBehavior} />
+      </div>
+
+      <div className="permission-item permission-item-minimal voice-activation-setting">
+        <div>
+          <h3 className="permission-item-title">Voice activation</h3>
+          <p className="permission-status">Say "Hey Murmur" to open the audio pill.</p>
+        </div>
+        <button
+          type="button"
+          className={`permission-toggle ${props.voiceActivationEnabled ? "permission-toggle-on" : ""}`}
+          onClick={() => {
+            props.onVoiceActivationEnabledChange(!props.voiceActivationEnabled);
+          }}
+          aria-pressed={props.voiceActivationEnabled}
+          aria-label={props.voiceActivationEnabled ? "Disable voice activation" : "Enable voice activation"}
+        />
       </div>
 
     </div>
@@ -648,6 +667,7 @@ export function OnboardingGateScaffold({ onCompleted, initialLoadError }: Onboar
     await persistBrowserProfileId(
       normalizeBrowserProfileId(formData.permissions.browserProfileId)
     );
+    persistVoiceActivationEnabled(formData.preferences.voiceActivationEnabled);
   };
 
   const applyValidationForCurrentStep = (): boolean => {
@@ -707,7 +727,7 @@ export function OnboardingGateScaffold({ onCompleted, initialLoadError }: Onboar
   const updateStepField = <TStep extends StepKey, TField extends keyof OnboardingFormData[TStep]>(
     step: TStep,
     field: TField,
-    value: string,
+    value: OnboardingFormData[TStep][TField],
   ) => {
     setFormData((previous) => ({
       ...previous,
@@ -792,6 +812,7 @@ export function OnboardingGateScaffold({ onCompleted, initialLoadError }: Onboar
               <AudioSetupStep
                 permissions={formData.permissions}
                 shortcutBehavior={formData.preferences.shortcutBehavior}
+                voiceActivationEnabled={formData.preferences.voiceActivationEnabled}
                 permissionErrors={stepErrors.permissions}
                 preferenceErrors={stepErrors.preferences}
                 checkingStatus={isCheckingPermission}
@@ -800,6 +821,10 @@ export function OnboardingGateScaffold({ onCompleted, initialLoadError }: Onboar
                 onOpenMicrophoneSettings={openMicrophoneSettings}
                 onShortcutBehaviorChange={(value) => {
                   updateStepField("preferences", "shortcutBehavior", value);
+                }}
+                onVoiceActivationEnabledChange={(enabled) => {
+                  updateStepField("preferences", "voiceActivationEnabled", enabled);
+                  persistVoiceActivationEnabled(enabled);
                 }}
                 browserUseApiKey={browserUseApiKey}
                 onBrowserUseApiKeyChange={(value) => {

@@ -25,6 +25,7 @@ export type OnboardingFormData = {
   };
   preferences: {
     shortcutBehavior: string;
+    voiceActivationEnabled: boolean;
     notes: string;
   };
 };
@@ -39,8 +40,8 @@ export type StepErrors = Record<string, string>;
 
 type FieldValidator = (value: string) => string | null;
 
-type StepSchema<TFields extends Record<string, string>> = {
-  [K in keyof TFields]: FieldValidator[];
+type StepSchema<TFields extends Record<string, unknown>> = {
+  [K in keyof TFields]?: FieldValidator[];
 };
 
 const REQUIRED_MESSAGE = "This field is required.";
@@ -116,6 +117,7 @@ export function createDefaultOnboardingData(): OnboardingFormData {
     },
     preferences: {
       shortcutBehavior: "Cmd+Shift+Space",
+      voiceActivationEnabled: false,
       notes: "",
     },
   };
@@ -176,6 +178,7 @@ export function mergePersistedOnboardingData(raw: unknown): OnboardingFormData {
     },
     preferences: {
       shortcutBehavior: persistedShortcutBehavior,
+      voiceActivationEnabled: preferences.voiceActivationEnabled === true,
       notes: typeof preferences.notes === "string" ? preferences.notes : defaults.preferences.notes,
     },
   };
@@ -208,11 +211,12 @@ export function deriveCurrentStep(raw: unknown): number {
 
 export function validateStep(step: StepKey, data: OnboardingFormData): StepErrors {
   const validators = SCHEMA[step];
-  const values = data[step] as Record<string, string>;
+  const values = data[step] as Record<string, unknown>;
   const nextErrors: StepErrors = {};
 
   Object.entries(validators).forEach(([field, fieldValidators]) => {
-    const value = values[field] ?? "";
+    const rawValue = values[field];
+    const value = typeof rawValue === "string" ? rawValue : "";
     const message = fieldValidators.map((validator) => validator(value)).find((result) => result !== null);
     if (message) {
       nextErrors[field] = message;
