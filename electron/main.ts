@@ -20,6 +20,7 @@ import { createMainWindow, getMainWindow } from "./windows/mainWindow";
 import { createVoicePopoverWindow } from "./windows/voicePopoverWindow";
 import { isMicrophonePermission, isTrustedMicrophoneRequest } from "./permissions/mediaPermissions";
 import { PendingOAuthCallbackStore } from "./oauthCallback";
+import { resolveVoicePopoverToggleAction } from "./voicePopoverBehavior";
 
 app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
 
@@ -107,6 +108,22 @@ function cancelPopoverTransitionAnimation(): void {
 function cancelPopoverAnimations(): void {
   cancelRepositionAnimation();
   cancelPopoverTransitionAnimation();
+}
+
+function emitPopoverActiveChange(active: boolean): void {
+  if (!voicePopoverWindow || voicePopoverWindow.isDestroyed()) {
+    return;
+  }
+
+  voicePopoverWindow.webContents.send("popover:active-changed", active);
+}
+
+function getReusableVoicePopover(): BrowserWindow | null {
+  if (!voicePopoverWindow || voicePopoverWindow.isDestroyed()) {
+    return null;
+  }
+
+  return voicePopoverWindow;
 }
 
 const GLOBAL_SHORTCUT = "CommandOrControl+Shift+Space";
@@ -226,6 +243,14 @@ function registerMediaPermissionHandlers(): void {
 }
 
 type SessionStoreData = Readonly<Record<string, string>>;
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+
+  return String(error || "Unknown error");
+}
 
 function getSessionStorePath(): string {
   return path.join(app.getPath("userData"), AUTH_STORE_FILENAME);
@@ -411,8 +436,10 @@ function registerAuthIpcHandlers(config: SupabasePublicConfig): void {
 
     try {
       return await systemPreferences.askForMediaAccess("microphone");
-    } catch {
-      return false;
+    } catch (error) {
+      const message = getErrorMessage(error);
+      console.error("[electron] Failed to request microphone access:", message);
+      throw new Error(`Unable to request microphone access: ${message}`);
     }
   });
 
@@ -576,8 +603,9 @@ function registerProtocolHandlers(): void {
 }
 
 function getOrCreateVoicePopover(): BrowserWindow {
-  if (voicePopoverWindow && !voicePopoverWindow.isDestroyed()) {
-    return voicePopoverWindow;
+  const reusableWindow = getReusableVoicePopover();
+  if (reusableWindow) {
+    return reusableWindow;
   }
 
   voicePopoverWindow = createVoicePopoverWindow();
@@ -600,10 +628,30 @@ function getOrCreateVoicePopover(): BrowserWindow {
     voicePopoverIntentVisible = false;
     voicePopoverCollapsed = false;
     voicePopoverExpandingFromNotch = false;
+    emitPopoverActiveChange(false);
     voicePopoverWindow = null;
   });
 
   return voicePopoverWindow;
+}
+
+function focusVoicePopover(win: BrowserWindow): void {
+  if (win.isDestroyed()) {
+    return;
+  }
+
+  win.setAlwaysOnTop(true, "screen-saver");
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+
+  if (process.platform === "darwin") {
+    app.focus({ steal: true });
+  } else {
+    app.focus();
+  }
+
+  win.show();
+  win.moveTop();
+  win.focus();
 }
 
 function showVoicePopover(): void {
@@ -626,6 +674,7 @@ function showVoicePopover(): void {
   // Mark intent BEFORE show()/animate so that any IPC that fires immediately
   // after sees the correct state.
   voicePopoverIntentVisible = true;
+  emitPopoverActiveChange(true);
 
   // If currently collapsed as a bottom notch, animate back to centered home.
   if (wasCollapsed) {
@@ -653,21 +702,7 @@ function showVoicePopover(): void {
     snapPopoverToCenter();
   }
 
-  // Re-assert the window level — macOS can reset it between shows.
-  win.setAlwaysOnTop(true, "screen-saver");
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-
-  // Activate the Electron app BEFORE show+focus so macOS doesn't give focus
-  // back to the previously active app after win.focus().
-  if (process.platform === "darwin") {
-    app.focus({ steal: true });
-  } else {
-    app.focus();
-  }
-
-  win.show();
-  win.moveTop();
-  win.focus();
+  focusVoicePopover(win);
 
   // Notify the renderer that the popover was just shown so it can re-apply
   // the correct window size (e.g. when a response card is already visible).
@@ -677,7 +712,11 @@ function showVoicePopover(): void {
 }
 
 function collapseVoicePopoverToNotch(): void {
-  const win = getOrCreateVoicePopover();
+  const win = getReusableVoicePopover();
+  if (!win) {
+    showVoicePopover();
+    return;
+  }
 
   if (pendingVoicePopoverBlurHideTimer !== null) {
     clearTimeout(pendingVoicePopoverBlurHideTimer);
@@ -687,6 +726,7 @@ function collapseVoicePopoverToNotch(): void {
   cancelPopoverAnimations();
 
   voicePopoverIntentVisible = false;
+  emitPopoverActiveChange(false);
   voicePopoverCollapsed = true;
   voicePopoverExpandingFromNotch = false;
   voicePopoverOpenedAtMs = null;
@@ -697,6 +737,7 @@ function collapseVoicePopoverToNotch(): void {
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.show();
   win.moveTop();
+  win.blur();
 
   const { x, y } = getBottomCenterTarget(POPOVER_NOTCH_WIDTH, POPOVER_NOTCH_HEIGHT);
   animatePopoverGeometry(x, y, POPOVER_NOTCH_WIDTH, POPOVER_NOTCH_HEIGHT, 360);
@@ -707,10 +748,13 @@ function toggleVoicePopover(): void {
   // can mark the window as not-visible when switching Spaces even though we
   // intentionally showed it. Relying on isVisible() causes double-show or
   // double-hide races when the user switches windows and re-triggers.
-  if (voicePopoverIntentVisible) {
+  const action = resolveVoicePopoverToggleAction({
+    intentVisible: voicePopoverIntentVisible,
+    hasReusableWindow: getReusableVoicePopover() !== null,
+  });
+
+  if (action === "collapse") {
     collapseVoicePopoverToNotch();
-  } else if (voicePopoverCollapsed) {
-    showVoicePopover();
   } else {
     showVoicePopover();
   }
@@ -749,6 +793,7 @@ function hideVoicePopover(): void {
   // (repositionPopover, resizePopover) that arrives after we call hide()
   // is correctly ignored.
   voicePopoverIntentVisible = false;
+  emitPopoverActiveChange(false);
   voicePopoverCollapsed = false;
   voicePopoverExpandingFromNotch = false;
 
@@ -848,11 +893,9 @@ function registerShortcutIpcHandlers(): void {
     if (!voicePopoverIntentVisible) {
       showVoicePopover();
     } else {
-      // Re-assert on top even if already visible (e.g. something covered it)
+      // Re-assert focus/on-top even if already visible (e.g. something covered it).
       const win = getOrCreateVoicePopover();
-      win.setAlwaysOnTop(true, "screen-saver");
-      win.moveTop();
-      win.focus();
+      focusVoicePopover(win);
     }
   });
 
@@ -929,6 +972,8 @@ function registerShortcutIpcHandlers(): void {
     voicePopoverWindow.setSize(newWidth, newHeight);
     voicePopoverWindow.setPosition(oldX + dx, oldY + dy);
   });
+
+  ipcMain.handle("shortcut:is-popover-active", () => voicePopoverIntentVisible);
 }
 
 function wait(ms: number): Promise<void> {
@@ -965,6 +1010,7 @@ async function bootstrap(): Promise<void> {
   registerMediaPermissionHandlers();
 
   const mainWin = createMainWindow();
+  getOrCreateVoicePopover();
   mainWin.on("close", (event) => {
     if (!isQuitting) {
       event.preventDefault();

@@ -37,6 +37,14 @@ function getMicrophoneErrorMessage(error: unknown): string {
   return "Unable to start microphone recording. Check browser permissions and try again.";
 }
 
+function getDesktopMicrophonePermissionErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+
+  return "Unable to request microphone access. Open system privacy settings and check Murmur microphone permissions.";
+}
+
 export function useMicrophone({
   onAudioChunk,
   onStop,
@@ -134,7 +142,14 @@ export function useMicrophone({
   const startRecording = useCallback(async (): Promise<boolean> => {
     const desktopPermissions = window.desktop?.permissions;
     if (desktopPermissions?.requestMicrophoneAccess) {
-      const granted = await desktopPermissions.requestMicrophoneAccess();
+      let granted = false;
+      try {
+        granted = await desktopPermissions.requestMicrophoneAccess();
+      } catch (error) {
+        onError?.(getDesktopMicrophonePermissionErrorMessage(error));
+        return false;
+      }
+
       if (!granted) {
         onError?.(
           "Microphone access is not enabled. Allow microphone access for Murmur in system privacy settings, then try Start again."

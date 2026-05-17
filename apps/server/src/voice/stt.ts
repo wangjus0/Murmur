@@ -187,59 +187,76 @@ export class SttAdapter {
   // ---------------------------------------------------------------------------
 
   private async transcribeBatch(): Promise<string> {
-    if (!this.audioBuffer.length) return "";
+    return transcribePcm16Buffers(this.apiKey, this.audioBuffer);
+  }
+}
 
-    const pcmData = Buffer.concat(this.audioBuffer);
-    if (!pcmData.length) return "";
+export async function transcribePcm16Base64Chunks(
+  apiKey: string,
+  chunks: readonly string[]
+): Promise<string> {
+  return transcribePcm16Buffers(
+    apiKey,
+    chunks.map((chunk) => Buffer.from(chunk, "base64"))
+  );
+}
 
-    const wavData = this.buildWav(pcmData);
-    const wavBytes = new Uint8Array(wavData.length);
-    wavBytes.set(wavData);
+export async function transcribePcm16Buffers(
+  apiKey: string,
+  buffers: readonly Buffer[]
+): Promise<string> {
+  if (!buffers.length) return "";
 
-    const formData = new FormData();
-    formData.append("file", new Blob([wavBytes], { type: "audio/wav" }), "audio.wav");
-    formData.append("model_id", "scribe_v1");
-    formData.append("language_code", "en");
+  const pcmData = Buffer.concat(buffers);
+  if (!pcmData.length) return "";
 
-    const response = await fetch("https://api.elevenlabs.io/v1/speech-to-text", {
-      method: "POST",
-      headers: { "xi-api-key": this.apiKey },
-      body: formData,
-    });
+  const wavData = buildPcm16Wav(pcmData);
+  const wavBytes = new Uint8Array(wavData.length);
+  wavBytes.set(wavData);
 
-    if (!response.ok) {
-      const errText = await response.text().catch(() => "(unreadable)");
-      throw new Error(`ElevenLabs batch STT ${response.status}: ${errText}`);
-    }
+  const formData = new FormData();
+  formData.append("file", new Blob([wavBytes], { type: "audio/wav" }), "audio.wav");
+  formData.append("model_id", "scribe_v1");
+  formData.append("language_code", "en");
 
-    const result = (await response.json()) as { text?: string };
-    return result.text?.trim() ?? "";
+  const response = await fetch("https://api.elevenlabs.io/v1/speech-to-text", {
+    method: "POST",
+    headers: { "xi-api-key": apiKey },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const errText = await response.text().catch(() => "(unreadable)");
+    throw new Error(`ElevenLabs batch STT ${response.status}: ${errText}`);
   }
 
-  /** Wraps raw PCM16 mono audio in a minimal WAV container. */
-  private buildWav(pcmData: Buffer): Buffer {
-    const numChannels = 1;
-    const sampleRate = AUDIO_SAMPLE_RATE;
-    const bitsPerSample = 16;
-    const byteRate = (sampleRate * numChannels * bitsPerSample) / 8;
-    const blockAlign = (numChannels * bitsPerSample) / 8;
-    const dataSize = pcmData.length;
+  const result = (await response.json()) as { text?: string };
+  return result.text?.trim() ?? "";
+}
 
-    const header = Buffer.alloc(44);
-    header.write("RIFF", 0, "ascii");
-    header.writeUInt32LE(36 + dataSize, 4);
-    header.write("WAVE", 8, "ascii");
-    header.write("fmt ", 12, "ascii");
-    header.writeUInt32LE(16, 16);
-    header.writeUInt16LE(1, 20);       // PCM = 1
-    header.writeUInt16LE(numChannels, 22);
-    header.writeUInt32LE(sampleRate, 24);
-    header.writeUInt32LE(byteRate, 28);
-    header.writeUInt16LE(blockAlign, 32);
-    header.writeUInt16LE(bitsPerSample, 34);
-    header.write("data", 36, "ascii");
-    header.writeUInt32LE(dataSize, 40);
+/** Wraps raw PCM16 mono audio in a minimal WAV container. */
+export function buildPcm16Wav(pcmData: Buffer): Buffer {
+  const numChannels = 1;
+  const sampleRate = AUDIO_SAMPLE_RATE;
+  const bitsPerSample = 16;
+  const byteRate = (sampleRate * numChannels * bitsPerSample) / 8;
+  const blockAlign = (numChannels * bitsPerSample) / 8;
+  const dataSize = pcmData.length;
 
-    return Buffer.concat([header, pcmData]);
-  }
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0, "ascii");
+  header.writeUInt32LE(36 + dataSize, 4);
+  header.write("WAVE", 8, "ascii");
+  header.write("fmt ", 12, "ascii");
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(numChannels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write("data", 36, "ascii");
+  header.writeUInt32LE(dataSize, 40);
+
+  return Buffer.concat([header, pcmData]);
 }

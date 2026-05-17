@@ -15,8 +15,10 @@ type DesktopShortcutApi = {
   showPopover: () => Promise<void>;
   repositionPopover: (position: "center" | "top-right" | "top-center" | "bottom-center") => Promise<void>;
   resizePopover: (width: number, height: number, anchorBottom?: boolean) => Promise<void>;
+  isPopoverActive: () => Promise<boolean>;
   onPopoverDidShow: (listener: () => void) => () => void;
   onPopoverCollapsedChange: (listener: (collapsed: boolean) => void) => () => void;
+  onPopoverActiveChange: (listener: (active: boolean) => void) => () => void;
 };
 
 type DesktopAuthApi = {

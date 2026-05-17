@@ -5,11 +5,13 @@ import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 import { registerReplayRoutes } from "./http/replay-routes.js";
 import { buildDesktopOAuthCallbackUrl } from "./http/auth-callback.js";
+import { createLocalCorsMiddleware } from "./http/local-cors.js";
 import { SessionMemoryStore } from "./memory/session-memory-store.js";
 import { SessionPersistenceService } from "./modules/session/session-persistence-service.js";
 import { SupabaseSessionPersistence } from "./persistence/supabase-session-persistence.js";
 import { createBrowserUseProfilesRouter } from "./routes/browser-use-profiles.js";
 import { createSessionsRouter } from "./routes/sessions.js";
+import { createWakeDetectionRouter } from "./routes/wake-detection.js";
 import { Session } from "./ws/session.js";
 
 // -- OpenRouter AI client --
@@ -23,8 +25,11 @@ const app = express();
 const sessionStore = new SessionMemoryStore();
 const sessionPersistence = new SessionPersistenceService(sessionStore);
 
+app.use(createLocalCorsMiddleware());
+app.use(express.json({ limit: "4mb" }));
 app.use("/sessions", createSessionsRouter(sessionPersistence));
 app.use("/integrations/browser-use/profiles", createBrowserUseProfilesRouter(env.BROWSER_USE_API_KEY));
+app.use("/api/wake-detect", createWakeDetectionRouter(env.ELEVEN_LABS_API_KEY));
 
 if (env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY) {
   const replayPersistence = new SupabaseSessionPersistence(

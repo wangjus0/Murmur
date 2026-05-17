@@ -13,6 +13,7 @@ import {
   type OnboardingFormData,
 } from "./features/auth/onboardingSchema";
 import { normalizeMicrophoneAccessStatus } from "./features/auth/microphonePermission";
+import { persistVoiceActivationEnabled } from "./features/voice/voiceActivationSettings";
 import {
   BROWSER_USE_INTEGRATIONS,
   BROWSER_USE_TOTAL_INTEGRATIONS,
@@ -230,6 +231,7 @@ export function App() {
     () => formatShortcutParts(settingsData?.preferences.shortcutBehavior ?? DEFAULT_SHORTCUT),
     [settingsData?.preferences.shortcutBehavior],
   );
+  const voiceActivationEnabled = settingsData?.preferences.voiceActivationEnabled ?? false;
   const isNameDirty = settingsData
     ? displayNameDraft.trim() !== settingsData.account.displayName.trim()
     : false;
@@ -356,6 +358,34 @@ export function App() {
       setSettingsStatusMessage("Keybind updated.");
     } catch (saveError) {
       setSettingsError(saveError instanceof Error ? saveError.message : "Failed to save keybind.");
+    }
+  };
+
+  const updateVoiceActivationEnabled = async (enabled: boolean) => {
+    if (!settingsData) {
+      return;
+    }
+
+    const nextData: OnboardingFormData = {
+      ...settingsData,
+      preferences: {
+        ...settingsData.preferences,
+        voiceActivationEnabled: enabled,
+      },
+    };
+
+    setSettingsData(nextData);
+    persistVoiceActivationEnabled(enabled);
+    setSettingsError(null);
+    setSettingsStatusMessage(null);
+
+    try {
+      await persistSettingsData(nextData);
+      setSettingsStatusMessage(enabled ? "Voice activation enabled." : "Voice activation disabled.");
+    } catch (saveError) {
+      setSettingsError(
+        saveError instanceof Error ? saveError.message : "Failed to save voice activation setting."
+      );
     }
   };
 
@@ -606,6 +636,7 @@ export function App() {
 
       const merged = mergePersistedOnboardingData(data?.responses ?? null);
       setSettingsData(merged);
+      persistVoiceActivationEnabled(merged.preferences.voiceActivationEnabled);
       setDisplayNameDraft(merged.account.displayName);
       setSettingsStepIndex(deriveCurrentStep(data?.responses ?? null));
       setIsLoadingSettingsData(false);
@@ -1107,6 +1138,26 @@ export function App() {
                         </button>
                       </div>
                       <p className="field-hint">Press Record to update key combo.</p>
+                    </div>
+
+                    <div className="permission-item permission-item-minimal voice-activation-setting">
+                      <div>
+                        <p className="permission-item-title">Voice activation</p>
+                        <p className="permission-status">Say "Hey Murmur" to open the audio pill.</p>
+                      </div>
+                      <button
+                        type="button"
+                        className={`permission-toggle ${voiceActivationEnabled ? "permission-toggle-on" : ""}`}
+                        onClick={() => {
+                          void updateVoiceActivationEnabled(!voiceActivationEnabled);
+                        }}
+                        aria-pressed={voiceActivationEnabled}
+                        aria-label={
+                          voiceActivationEnabled
+                            ? "Disable voice activation"
+                            : "Enable voice activation"
+                        }
+                      />
                     </div>
                   </article>
                 </div>

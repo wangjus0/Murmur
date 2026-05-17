@@ -29,6 +29,7 @@ const desktopApi = Object.freeze({
       ipcRenderer.invoke("shortcut:reposition-popover", position),
     resizePopover: (width: number, height: number, anchorBottom?: boolean) =>
       ipcRenderer.invoke("shortcut:resize-popover", width, height, anchorBottom),
+    isPopoverActive: () => ipcRenderer.invoke("shortcut:is-popover-active"),
     onPopoverDidShow: (listener: () => void) => {
       const wrappedListener = () => listener();
       ipcRenderer.on("popover:did-show", wrappedListener);
@@ -41,6 +42,13 @@ const desktopApi = Object.freeze({
       ipcRenderer.on("popover:collapsed-changed", wrappedListener);
       return () => {
         ipcRenderer.removeListener("popover:collapsed-changed", wrappedListener);
+      };
+    },
+    onPopoverActiveChange: (listener: (active: boolean) => void) => {
+      const wrappedListener = (_event: Electron.IpcRendererEvent, active: boolean) => listener(active);
+      ipcRenderer.on("popover:active-changed", wrappedListener);
+      return () => {
+        ipcRenderer.removeListener("popover:active-changed", wrappedListener);
       };
     },
   },

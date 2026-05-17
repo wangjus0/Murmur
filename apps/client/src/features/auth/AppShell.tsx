@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { App } from "../../App";
 import { getSupabaseClient } from "../../lib/supabase";
 import { persistBrowserProfileId } from "../../lib/browser-profile";
+import { persistVoiceActivationEnabled } from "../voice/voiceActivationSettings";
 import { useAuth } from "./AuthProvider";
 import { AuthScreen } from "./AuthScreen";
 import { resolveGuardDestination } from "./guard";
@@ -35,6 +36,7 @@ export function AppShell() {
 
     const loadOnboardingStatus = async () => {
       if (!user) {
+        persistVoiceActivationEnabled(false);
         if (isActive) {
           setOnboardingStatus({
             isLoading: false,
@@ -75,6 +77,11 @@ export function AppShell() {
       if (data?.responses) {
         const merged = mergePersistedOnboardingData(data.responses);
         await persistBrowserProfileId(merged.permissions.browserProfileId.trim() || null);
+        persistVoiceActivationEnabled(
+          data.completed === true && merged.preferences.voiceActivationEnabled
+        );
+      } else {
+        persistVoiceActivationEnabled(false);
       }
 
       setOnboardingStatus({
