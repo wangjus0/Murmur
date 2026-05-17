@@ -21,6 +21,7 @@ import {
   VOICE_ACTIVATION_SETTINGS_EVENT,
   VOICE_ACTIVATION_STORAGE_KEY,
 } from "./voiceActivationSettings";
+import { resolveVoicePopoverShortcutAction } from "./voicePopoverShortcuts";
 
 // Delay (in ms) before the renderer is allowed to send repositionPopover /
 // resizePopover IPC calls after mount. This gives the main process time to
@@ -873,7 +874,17 @@ export function VoicePopover() {
 
   const handleKeyDownRef = useRef<((event: KeyboardEvent) => void) | undefined>(undefined);
   handleKeyDownRef.current = (event: KeyboardEvent) => {
-    if (event.key === "Escape") {
+    const action = resolveVoicePopoverShortcutAction({
+      key: event.key,
+      repeat: event.repeat,
+      altKey: event.altKey,
+      ctrlKey: event.ctrlKey,
+      metaKey: event.metaKey,
+      shiftKey: event.shiftKey,
+      canToggleMic: !micDisabled && !showCollapsedNotch,
+    });
+
+    if (action === "close") {
       event.preventDefault();
       if (textPanelOpen) {
         setTextPanelOpen(false);
@@ -893,7 +904,7 @@ export function VoicePopover() {
       return;
     }
 
-    if (event.key === " " && !event.repeat) {
+    if (action === "toggle-mic") {
       event.preventDefault();
       void toggleRecording();
     }

@@ -41,6 +41,17 @@ test("space is ignored when a modifier key is held", () => {
   assert.equal(result, "none");
 });
 
+test("global shortcut chord is ignored by the renderer", () => {
+  const result = resolveVoicePopoverShortcutAction({
+    ...baseInput,
+    key: " ",
+    metaKey: true,
+    shiftKey: true,
+  });
+
+  assert.equal(result, "none");
+});
+
 test("space is ignored when mic toggle is unavailable", () => {
   const result = resolveVoicePopoverShortcutAction({
     ...baseInput,
